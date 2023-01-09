@@ -7,7 +7,9 @@ Created on Wed Jan  4 21:13:47 2023
 """
 import os
 import argparse
+import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 
 # Description
@@ -63,6 +65,71 @@ def join_unique_and_train(u_dataframe, t_dataframe):
     return(combined_df)
 
 
+def run_preprocessing(dataframe):
+    '''View the raw data and make our attempts to normalize and scale the data
+    if needed.'''
+    # View scatter plot of data to see if there are any outliers
+    df = dataframe.copy(deep=True)
+
+    # Features with heavy right skewed data
+    right_scewed_data = [
+        'wtd_gmean_atomic_mass', 'wtd_range_atomic_mass',
+        'wtd_gmean_Density',
+        'mean_ElectronAffinity', 'wtd_mean_ElectronAffinity',
+        'gmean_ElectronAffinity', 'wtd_gmean_ElectronAffinity',
+        'mean_FusionHeat', 'wtd_mean_FusionHeat', 'gmean_FusionHeat',
+        'wtd_gmean_FusionHeat', 'wtd_range_FusionHeat', 'std_FusionHeat',
+        'wtd_std_FusionHeat',
+        'gmean_ThermalConductivity',
+        'wtd_gmean_ThermalConductivity', 'wtd_range_ThermalConductivity',
+        'mean_Valence', 'wtd_mean_Valence', 'gmean_Valence',
+        'wtd_range_Valence', 'wtd_gmean_Valence', 'std_Valence',
+        'wtd_std_Valence']
+
+    # Features with heavy left skewed data
+    left_scewed_data = [
+        'entropy_fie', 'entropy_atomic_radius', 'wtd_entropy_atomic_radius',
+        'entropy_Valence']
+
+    log(
+        "Applying log transformation to these right scewed"
+        " features: \n{}".format(right_scewed_data))
+
+    # Lambda functions to apply transformations to features
+    for feat in right_scewed_data:
+        df[feat] = df[feat].apply(lambda x: x + 1)
+        df[feat] = np.log(df[feat])
+        # df.plot.hist(column=[feat], range=[df[feat].min(), df[feat].max()])
+
+    log(
+        "Applying exponential transformation to these left scewed"
+        " features: \n{}".format(left_scewed_data))
+
+    # Lambda functions to apply transformations to features
+    for feat in left_scewed_data:
+        df[feat] = df[feat].apply(lambda x: x**2)
+        # df.plot.hist(column=[feat], range=[df[feat].min(), df[feat].max()])
+
+    # Remove the critical_temp (out target) column before it gets scaled too
+    tmp_target = df['critical_temp']
+    df = df.drop(['critical_temp'], axis=1)
+
+    # Get column names to add back
+    col_names = df.columns
+
+    # Apply the sklearn stadard scaler
+    df_scaler = StandardScaler()
+    df = df_scaler.fit_transform(df)
+
+    # Turn it back into a dataframe
+    df = pd.DataFrame(data=df, columns=col_names)
+
+    # Add back the target column
+    df = df.join(tmp_target)
+
+    return(df)
+
+
 if __name__ == "__main__":
     # Grab arguments if provided.
     parser = argparse.ArgumentParser(description=program_desc)
@@ -71,7 +138,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-t", "--train_csv", help="Path to the unique_m.csv", metavar='\b')
     parser.add_argument(
-        "-v", "--verbose", help="Enable verbose logging", action="store_true")
+        "-v", "--verbose", help="Enable verbose", action="store_true")
     args = parser.parse_args()
 
     # If arguments are provided then treat them as the defualt location for the
@@ -103,7 +170,11 @@ if __name__ == "__main__":
     unique_df, train_df = read_in_date(unique_loc, train_loc)
 
     # Create a dataframe based on joining the two dataframes
-    combined_df = join_unique_and_train(unique_df, train_df)
+    working_df = join_unique_and_train(unique_df, train_df)
+
+    # Run preprocessing on the data that may include normalization and scaling
+    test = run_preprocessing(working_df)
+
 
 
 
