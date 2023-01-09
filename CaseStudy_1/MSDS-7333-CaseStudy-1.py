@@ -173,7 +173,7 @@ if __name__ == "__main__":
     working_df = join_unique_and_train(unique_df, train_df)
 
     # Run preprocessing on the data that may include normalization and scaling
-    test = run_preprocessing(working_df)
+    working_df = run_preprocessing(working_df)
 
 
 
