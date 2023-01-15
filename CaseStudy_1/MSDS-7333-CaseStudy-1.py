@@ -116,7 +116,7 @@ def get_lasso_alpha(w_dataframe):
     model = Lasso(max_iter=1000)
 
     # Create standard range
-    std_range = np.arange(.01, 11.0, 0.1)
+    std_range = np.arange(.01, 5.01, 0.01)
 
     param_dist = {"alpha": std_range}
 
@@ -140,7 +140,7 @@ def get_lasso_alpha(w_dataframe):
         plt.plot(std_range, V[i], label=i)
 
     plt.plot(std_range, vi)
-    plt.xlabel('Iteration')
+    plt.xlabel('Alpha')
     plt.ylabel('Coefficients')
     plt.title('Convergence of Lasso Coefficients')
     plt.show()
@@ -180,7 +180,7 @@ def get_ridge_alpha(w_dataframe):
         plt.plot(std_dist, V[i], label=i)
 
     plt.plot(std_dist, vi)
-    plt.xlabel('Iteration')
+    plt.xlabel('Alpha')
     plt.ylabel('Coefficients')
     plt.title('Convergence of Ridge Coefficients')
     plt.show()
