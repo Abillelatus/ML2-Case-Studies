@@ -364,33 +364,3 @@ if __name__ == "__main__":
         "L1 (Lasso)", working_df, lasso_model, lasso_alpha, lasso_mse_means)
     display_stats(
         "L2 (Ridge)", working_df, ridge_model, ridge_alpha, ridge_mse_means)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
