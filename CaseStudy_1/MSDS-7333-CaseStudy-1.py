@@ -2,14 +2,22 @@
 # -*- coding: utf-8 -*-
 """
 Created on Wed Jan  4 21:13:47 2023
+Last Version: Jan 14
 
 @author: Luke Stodgel, Ryan Herrin
 """
 import os
 import argparse
+import warnings
 import numpy as np
 import pandas as pd
+import scipy.stats as st
+from matplotlib import pyplot as plt
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV  # KFold, cross_val_score
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import Lasso, Ridge
+from sklearn.metrics import mean_squared_error
 
 
 # Description
@@ -34,6 +42,14 @@ def log(string_x):
         print("[Case Study 1] > {}".format(str(string_x)))
     else:
         pass
+
+
+def warn(*args, **kwargs):
+    '''Supress the sklearn warnings'''
+    pass
+
+
+warnings.warn = warn
 
 
 def read_in_date(unique_path, train_path):
@@ -71,45 +87,6 @@ def run_preprocessing(dataframe):
     # View scatter plot of data to see if there are any outliers
     df = dataframe.copy(deep=True)
 
-    # Features with heavy right skewed data
-    right_scewed_data = [
-        'wtd_gmean_atomic_mass', 'wtd_range_atomic_mass',
-        'wtd_gmean_Density',
-        'mean_ElectronAffinity', 'wtd_mean_ElectronAffinity',
-        'gmean_ElectronAffinity', 'wtd_gmean_ElectronAffinity',
-        'mean_FusionHeat', 'wtd_mean_FusionHeat', 'gmean_FusionHeat',
-        'wtd_gmean_FusionHeat', 'wtd_range_FusionHeat', 'std_FusionHeat',
-        'wtd_std_FusionHeat',
-        'gmean_ThermalConductivity',
-        'wtd_gmean_ThermalConductivity', 'wtd_range_ThermalConductivity',
-        'mean_Valence', 'wtd_mean_Valence', 'gmean_Valence',
-        'wtd_range_Valence', 'wtd_gmean_Valence', 'std_Valence',
-        'wtd_std_Valence']
-
-    # Features with heavy left skewed data
-    left_scewed_data = [
-        'entropy_fie', 'entropy_atomic_radius', 'wtd_entropy_atomic_radius',
-        'entropy_Valence']
-
-    log(
-        "Applying log transformation to these right scewed"
-        " features: \n{}".format(right_scewed_data))
-
-    # Lambda functions to apply transformations to features
-    for feat in right_scewed_data:
-        df[feat] = df[feat].apply(lambda x: x + 1)
-        df[feat] = np.log(df[feat])
-        # df.plot.hist(column=[feat], range=[df[feat].min(), df[feat].max()])
-
-    log(
-        "Applying exponential transformation to these left scewed"
-        " features: \n{}".format(left_scewed_data))
-
-    # Lambda functions to apply transformations to features
-    for feat in left_scewed_data:
-        df[feat] = df[feat].apply(lambda x: x**2)
-        # df.plot.hist(column=[feat], range=[df[feat].min(), df[feat].max()])
-
     # Remove the critical_temp (out target) column before it gets scaled too
     tmp_target = df['critical_temp']
     df = df.drop(['critical_temp'], axis=1)
@@ -128,6 +105,201 @@ def run_preprocessing(dataframe):
     df = df.join(tmp_target)
 
     return(df)
+
+
+def get_lasso_alpha(w_dataframe):
+    # Create train/test split
+    # Split the data into X and y
+    X_scaled = w_dataframe.drop('critical_temp', axis=1)
+    y = w_dataframe['critical_temp']
+
+    model = Lasso(max_iter=1000)
+
+    # Create standard range
+    std_range = np.arange(.01, 11.0, 0.1)
+
+    param_dist = {"alpha": std_range}
+
+    log("Creating best alpha value for L1 (Lasso)")
+    # neg_mean_absolute_error suggested 0.01
+    grid_search = GridSearchCV(model, param_grid=param_dist, scoring='r2', cv=5)
+    grid_search.fit(X_scaled, y)
+
+    log("Best Alpha value for L1 is: {}".format(
+        grid_search.best_params_['alpha']))
+
+    # Plot the coefficients
+    vi = []
+    for i in std_range:
+        model.alpha = i
+        model.fit(X_scaled, y)
+        vi.append(model.coef_)
+
+    V = pd.DataFrame(np.array(vi), columns=X_scaled.columns)
+    for i in V.columns:
+        plt.plot(std_range, V[i], label=i)
+
+    plt.plot(std_range, vi)
+    plt.xlabel('Iteration')
+    plt.ylabel('Coefficients')
+    plt.title('Convergence of Lasso Coefficients')
+    plt.show()
+
+    return(model, grid_search.best_params_)
+
+
+def get_ridge_alpha(w_dataframe):
+    # Create train/test split
+    # Split the data into X and y
+    X_scaled = w_dataframe.drop('critical_temp', axis=1)
+    y = w_dataframe['critical_temp']
+
+    std_dist = np.arange(1, 2000, 10)
+
+    model = Ridge()
+    param_dist = {'alpha': std_dist}
+
+    log("Creating best alpha value for L2 (Ridge)")
+    grid_search = GridSearchCV(
+        model, param_grid=param_dist, scoring='neg_mean_squared_error', cv=5)
+
+    grid_search.fit(X_scaled, y)
+
+    log("Best Alpha value for L2 is: {}".format(
+        grid_search.best_params_['alpha']))
+
+    # Plot the coefficients
+    vi = []
+    for i in std_dist:
+        model.alpha = i
+        model.fit(X_scaled, y)
+        vi.append(model.coef_)
+
+    V = pd.DataFrame(np.array(vi), columns=X_scaled.columns)
+    for i in V.columns:
+        plt.plot(std_dist, V[i], label=i)
+
+    plt.plot(std_dist, vi)
+    plt.xlabel('Iteration')
+    plt.ylabel('Coefficients')
+    plt.title('Convergence of Ridge Coefficients')
+    plt.show()
+
+    return(model, grid_search.best_params_)
+
+
+def _get_non_zero_coef_list(df, model):
+    '''Create a list of coefficients from a model and return it'''
+    coef_list = []
+    for col in range(len(df.columns[:-1])):
+        if model.coef_[col] != 0:
+            coef_list.append((df.columns[col], abs(model.coef_[col])))
+
+    # Sort the list from high to low
+    coef_list = sorted(coef_list, key=lambda x: x[1], reverse=True)
+
+    return(coef_list)
+
+
+def get_lasso_mse(dataframe, best_alpha):
+    '''Get the mse of the lasso model with multiple runs'''
+    # Split the data into train and test sets
+    X = dataframe.drop('critical_temp', axis=1)
+    y = dataframe['critical_temp']
+
+    # Container to hold the means
+    lasso_means = []
+
+    log("Calculating MSE for Lasso...")
+    for mse_run in range(100):
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+        # Instantiate a Lasso regressor
+        l1_model = Lasso(alpha=best_alpha['alpha'])
+
+        # Fit the regressor to the data
+        l1_model.fit(X_train, y_train)
+
+        # Predict on the test set
+        y_pred = l1_model.predict(X_test)
+
+        # Compute the MSE of the Lasso model
+        lasso_means.append(round(mean_squared_error(y_test, y_pred), 1))
+
+    plt.hist(lasso_means)
+    plt.title(
+        'Range of Scores of L1 with Lambda = {}'.format(best_alpha['alpha']))
+    plt.xlabel('Mean Squared Error')
+    plt.ylabel('Count of Runs')
+    plt.show()
+
+    return(lasso_means)
+
+
+def get_ridge_mse(dataframe, best_alpha):
+    '''Get the mse of the ridge model with multiple runs'''
+    # Split the data into train and test sets
+    X = dataframe.drop('critical_temp', axis=1)
+    y = dataframe['critical_temp']
+
+    ridge_means = []
+
+    log("Calculating MSE for Ridge")
+    for mse_run in range(100):
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+        # Instantiate a Lasso regressor
+        l2_model = Ridge(alpha=best_alpha['alpha'])
+
+        # Fit the regressor to the data
+        l2_model.fit(X_train, y_train)
+
+        # Predict on the test set
+        y_pred = l2_model.predict(X_test)
+
+        # Compute the MSE of the Lasso model
+        ridge_means.append(round(mean_squared_error(y_test, y_pred), 1))
+
+    plt.hist(ridge_means)
+    plt.title(
+        'Range of Scores of L2 with Lambda = {}'.format(best_alpha['alpha']))
+    plt.xlabel('Mean Squared Error')
+    plt.ylabel('Count of Runs')
+    plt.show()
+
+    return(ridge_means)
+
+
+def display_stats(model_name, df, model, best_alpha, mse_means):
+    '''Display the results from each model'''
+    # Get the mean for the MSE
+    mean_mse = round(np.mean(mse_means), 2)
+
+    # Get a list of the non-zero coefficents from the model
+    non_zero_coef = _get_non_zero_coef_list(df, model)
+
+    # Calculate the confidence intervals
+    mse_ci = st.norm.interval(
+        alpha=0.95, loc=np.mean(mse_means), scale=st.sem(mse_means))
+    conf_int_low = round(mse_ci[0], 2)
+    conf_int_high = round(mse_ci[1], 2)
+
+    print("\n")
+    print('=' * 25)
+    print("Results for: {}".format(model_name))
+    print("Best Alpha Value: {}".format(str(round(best_alpha['alpha'], 2))))
+    print("100 Run MSE: {}".format(str(mean_mse)))
+    print("95% C.I. of {} to {}".format(conf_int_low, conf_int_high))
+    print("Top features:")
+    print("---------------")
+    # Print out top 5 variables
+    feat_cnt = 0
+    for i in range(len(non_zero_coef)):
+        if feat_cnt >= 5:
+            break
+        print('{}: {}'.format(non_zero_coef[i][0], non_zero_coef[i][1]))
+        feat_cnt += 1
+    print('=' * 25)
 
 
 if __name__ == "__main__":
@@ -160,8 +332,8 @@ if __name__ == "__main__":
 
     # Can't find input files. Raise exception
     else:
-        input_err = ("One or more input files were found. Please specify unique"
-                     " and train csv files using the -u and -t flags...")
+        input_err = ("One or more input files were not found. Please specify"
+                     " unique and train csv files using the -u and -t flags...")
 
         raise Exception(input_err)
 
@@ -174,6 +346,28 @@ if __name__ == "__main__":
 
     # Run preprocessing on the data that may include normalization and scaling
     working_df = run_preprocessing(working_df)
+
+    # Create a Lasso model (L1) and return the model and the best alpha
+    lasso_model, lasso_alpha = get_lasso_alpha(working_df)
+
+    # Get the MSE from the lasso model
+    lasso_mse_means = get_lasso_mse(working_df, lasso_alpha)
+
+    # Create a Ridge model (L2) and return the model and best alpha
+    ridge_model, ridge_alpha = get_ridge_alpha(working_df)
+
+    # Generate the MSE from the Ridge Regression
+    ridge_mse_means = get_ridge_mse(working_df, ridge_alpha)
+
+    # Display the results
+    display_stats(
+        "L1 (Lasso)", working_df, lasso_model, lasso_alpha, lasso_mse_means)
+    display_stats(
+        "L2 (Ridge)", working_df, ridge_model, ridge_alpha, ridge_mse_means)
+
+
+
+
 
 
 
