@@ -187,7 +187,11 @@ def get_lasso_model(data, target):
     x_test_lasso = x_test[final_features]
 
     # Define the classifier
-    logreg_lasso = LogisticRegression(multi_class='ovr', C=.04)
+    logreg_lasso = LogisticRegression(
+        solver='liblinear',
+        multi_class='ovr',
+        C=.04,
+        penalty='l1')
 
     # Fit the classifier to the training data
     logreg_lasso.fit(x_train_lasso, y_train)
@@ -251,8 +255,11 @@ def get_full_model(data, target):
     best_score = search.best_score_
 
     # Define the classifier
-    logreg = LogisticRegression(multi_class='ovr',
-                                C=0.04)
+    logreg = LogisticRegression(
+        solver='liblinear',
+        multi_class='ovr',
+        penalty='l1',
+        C=0.04)
 
     # Fit the classifier to the training data
     logreg.fit(x_train, y_train)
@@ -342,6 +349,9 @@ if __name__ == "__main__":
     elif args.data_file is None:
         if os.path.exists(diabts_dflt_loc):
             diabts_csv_loc = diabts_dflt_loc
+        else:
+            raise Exception("Error: diabetic_data.csv could not be found.",
+                            "Please specifiy location using -f ")
 
     # Can't find input files. Raise exception
     else:
