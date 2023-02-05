@@ -6,10 +6,12 @@ Created on Tue Jan 31 08:49:00 2023
 @author: xclusive
 """
 
+import re
 import os
 import time
 import email
 import argparse
+import pandas as pd
 from io import StringIO
 import multiprocessing as m_proc
 from multiprocessing import Pool
@@ -21,8 +23,22 @@ dflt_path = ('/home/xclusive/rTek/School/SMU/MSDS_7333_Quantifying_The_World/'
              'QTW-Case-Studies/Datasets/SpamMessages')
 
 # Description for program
-program_desc = '''
+program_desc = '''Program to train a model to identify email spam that could
+later be used as a filter.
 '''
+
+# Symbol mapping for processing the payload data
+symbl_map = {
+    '!': 's_expl', '@': 's_at', '#': 's_pound', '$': 's_dollar',
+    '%': 's_percent', '^': 's_carrot', '&': 's_amp', '*': 's_astr',
+    '(': 's_l_prnth', ')': 's_r_prnth', '-': 's_dash',
+    '_': 's_under_score', '=': 's_equal', '+': 's_plus',
+    '`': 's_back_quote', '~': 's_tilda', '{': 's_open_brace',
+    '}': 's_close_brace', '[': 's_open_bracket', ']': 's_close_bracket',
+    '|': 's_pipe', '\\': 's_b_slash', ':': 's_colon', ';': 's_semi_colon',
+    "'": 's_single_quote', '"': 's_double_quote', '<': 's_left_arrow',
+    '>': 's_right_arrow', '?': 's_q_mark', ',': 's_comma', '.': 's_period',
+    '/': 's_forward_slash'}
 
 
 class EmailProcessing:
@@ -42,6 +58,8 @@ class EmailProcessing:
         self.stats = dict()
         self.pool_slices = None
         self.cpu_core_count = m_proc.cpu_count()
+        self.combined_data = None
+        self.static_col_names = None
 
     class MLStripper(HTMLParser):
         '''Inner class to handle html parsing/stripping of some emails'''
@@ -62,18 +80,20 @@ class EmailProcessing:
     def _build_file_path_list(self):
         '''Walk through the root folder and build a list of absolute paths to
         the emails'''
-        ignore_suffix = ['.py', '.ipynb', '.tmp']  # Files to ignore
+        ignore = ['.py', '.ipynb', '.tmp', 'cmds']  # Files to ignore
         for root, dirs, files in os.walk(self.path):
             for name in files:
-                # Make sure we are not bringing in extra files
-                if any(ext not in ignore_suffix for ext in os.path.join(
-                        root, name)):
+                # Make sure we are not bringing in non email files
+                # if any(ext not in ignore for ext in os.path.join(
+                #        root, name)):
+                if name not in ignore:
                     self.file_paths.append(os.path.join(root, name))
                 else:
                     pass
 
     def _process_html(self, html_file):
         '''If HTML file, strip tags and return data'''
+        # Create the MLStripper object and send it to process
         strip_fx = self.MLStripper()
         strip_fx.feed(html_file)
 
@@ -83,7 +103,9 @@ class EmailProcessing:
         '''Attempt to read the contents of an email and store the data as a
         dictionary where:
             {
-                str(filename) : [int(is_spam), str(payload)
+                str(filename) : [
+                    int(is_spam), str(path), str(payload), dict(stats)
+                    ]
             }
         '''
         email_content = dict()
@@ -113,8 +135,18 @@ class EmailProcessing:
                         # Do any pre processing to the payload data if needed
                         data = self._process_payload(data)
 
-                        # Add to the dictionary
-                        email_content[file_name] = [is_spam, data]
+                        if data == 1:
+                            pass
+                        else:
+                            # Initialize an empty payload stats dictionary
+                            init_stat_dict = {'stats': dict()}
+
+                            # Add to the dictionary
+                            email_content[file_name] = [
+                                is_spam,
+                                file,
+                                data,
+                                init_stat_dict]
 
         except Exception as err:
             print(str(err))
@@ -123,12 +155,11 @@ class EmailProcessing:
 
     def _process_payload(self, payload_data):
         '''Process the payload before passing it back.'''
-        # If the data is html, then strip the html tags
         _data = payload_data
 
-        # TODO: Need to find a way to handle payloads that are cast as lists
         if isinstance(_data, list):
-            return _data
+            return 1
+
         else:
             # If it's HTML data, strip the tags and return only the data
             if '<html>' in _data.lower():
@@ -136,10 +167,204 @@ class EmailProcessing:
 
         return _data
 
-    def _create_word_symbol_list(self, payload_data):
-        '''Parse through the data and create an word and symbol dictionary'''
-        # TODO: Continue here
-        return payload_data
+    def _create_payload_stats(self, email_dict):
+        '''Parse through the data and generate different stats from the payload
+        including Total Word Count, Total Symbol Count, How many words have the
+        first letter capitalized, how many words are all caps, average line
+        length, and a dictionary count of all symbols and words.'''
+        # Stats value is located at email[3]['stats']
+        # Payload to examine is email[2]
+        emails = email_dict
+
+        for entry in emails:
+            total_words = 0   # Total number of words
+            total_symbols = 0  # Total number of symbols
+            first_letter_cap = 0  # Num of Words with first letter capitalized
+            all_cap_words = 0  # Num of words that have words with all caps
+            avg_line_len = 0
+            line_count = 0
+            symbol_count = dict()
+            word_count = dict()
+
+            # Get payload data
+            payload_str = emails[entry][2]
+
+            wrk_pyld = payload_str.split('\n')
+
+            for line in range(len(wrk_pyld)):
+                # Strip leading and trailing white space
+                wrk_pyld[line] = wrk_pyld[line].strip()
+
+                # Ignore blank lines
+                if len(wrk_pyld[line]) >= 1:
+                    # Add line length to avg_line_len
+                    avg_line_len += len(wrk_pyld[line])
+                    line_count += 1
+                    # Remove apostrophe to avoid acceidently excluding
+                    # certain words
+                    wrk_pyld[line] = wrk_pyld[line].replace("'", "")
+                    # Get num of words, removing all symbols and numbers
+                    words = list([wrd for wrd in re.sub(
+                        r'[\W_]+', ' ',
+                        wrk_pyld[line]).split(' ') if wrd.isalpha()])
+
+                    # Get all the words in the payload
+                    for word in range(len(words)):
+                        # Increment the count of words if it's not blank
+                        if len(words[word]) > 0:
+                            total_words += 1
+                            # Check capitalization and add to stats
+                            if words[word][0].isupper():
+                                # The whole word is capitalized
+                                if words[word].isupper():
+                                    # The whole word need to be longer than
+                                    # 1 char to avoid "I" words
+                                    if len(words[word]) > 1:
+                                        all_cap_words += 1
+                                else:
+                                    # If only the first letter is capitalized
+                                    first_letter_cap += 1
+
+                            '''
+                            # Add to the dictionary of words
+                            # Check if word is longer than len 15, and create
+                            # It's own dictionary for that
+                            if len(words[word]) > 12:
+                                if 'large_str' in word_count:
+                                    word_count['large_str'] += 1
+                                else:
+                                    word_count['large_str'] = 1
+                            # Check unicode to catch other languages that is
+                            # not basic latic.
+                            if words[word] not in re.findall(r'[0000—007F]+', words[word]):
+                                if 'non_basic_latin' in word_count:
+                                    word_count['non_basic_latin'] += 1
+                                else:
+                                    word_count['non_basic_latin'] = 1
+                            '''
+                            if words[word].lower() in word_count:
+                                word_count[words[word].lower()] += 1
+                            else:
+                                word_count[words[word].lower()] = 1
+
+                    # Get all the symbols in the payload
+                    for char in wrk_pyld[line]:
+                        if not char.isalpha() and not char.isnumeric():
+                            # Remove blank characters
+                            if char != ' ' and char != '':
+                                # Add to total symbol count
+                                total_symbols += 1
+                                # Add to dictionary using the symbol mapping
+                                try:
+                                    if symbl_map[str(char)] in symbol_count:
+                                        symbol_count[symbl_map[str(char)]] += 1
+                                    else:
+                                        symbol_count[symbl_map[str(char)]] = 1
+                                # Handle all other symbols and chars
+                                except Exception as err:
+                                    err = err
+                                    if 's_other' in symbol_count:
+                                        symbol_count['s_other'] += 1
+                                    else:
+                                        symbol_count['s_other'] = 1
+
+            # Calculate average line length
+            if line_count == 0:
+                avg_line_len = 0
+            else:
+                avg_line_len = round((avg_line_len / line_count), 0)
+
+            # Add stats to the dictionary
+            emails[entry][3]['stats']['total_words'] = total_words
+            emails[entry][3]['stats']['total_symbols'] = total_symbols
+            emails[entry][3]['stats']['first_letter_cap'] = first_letter_cap
+            emails[entry][3]['stats']['all_cap_words'] = all_cap_words
+            emails[entry][3]['stats']['avg_line_len'] = avg_line_len
+            emails[entry][3]['stats']['line_count'] = line_count
+            emails[entry][3]['stats']['symbol_count'] = symbol_count
+            emails[entry][3]['stats']['word_count'] = word_count
+
+        return emails
+
+    def _prepare_dict_for_df(self, e_data_dict):
+        '''Prepares the dictionary to be more easily integrated with the
+        delivered dataframe'''
+        ret_lst = []
+        # Start with static columns that should appear first
+        _static_col_names = [
+            'line_count', 'avg_line_len',
+            'total_words', 'total_symbols', 'all_cap_words',
+            'first_letter_cap']
+
+        # List of all words and symbols to create columns for faster
+        # processing
+        word_list = set()
+        symbol_list = set()
+
+        for key in e_data_dict.keys():
+            _tmp_dict = dict()
+            _tmp_dict['filename'] = key
+            _tmp_dict['is_spam'] = e_data_dict[key][0]
+
+            for col in _static_col_names:
+                _tmp_dict[col] = e_data_dict[key][3]['stats'][col]
+
+            # Now Add the symbols and word list
+            '''
+            for word in e_data_dict[key][3]['stats']['word_count'].keys():
+                _words = e_data_dict[key][3]['stats']['word_count']
+                _tmp_dict[word] = _words[word]
+                word_list.add(word)
+            '''
+            for smbl in e_data_dict[key][3]['stats']['symbol_count'].keys():
+                _smbl = e_data_dict[key][3]['stats']['symbol_count']
+                _tmp_dict[smbl] = _smbl[smbl]
+                symbol_list.add(smbl)
+
+            ret_lst.append(_tmp_dict)
+
+        _static_col_names.insert(0, 'filename')
+        _static_col_names.insert(1, 'is_spam')
+
+        for _word in list(word_list):
+            _static_col_names.append(_word)
+        for _symb in list(symbol_list):
+            _static_col_names.append(_symb)
+
+        # Turn the list of dicts into a dataframe
+        ret_df = pd.DataFrame(columns=_static_col_names)
+
+        def _remove_duplicates(dataframe):
+            '''Check for and remove duplicate columns to mitigate the pandas
+            InvalideIndexError: exception'''
+            _ret_df = dataframe.loc[:, ~dataframe.columns.duplicated()].copy()
+
+            return _ret_df
+
+        for entry in ret_lst:
+            _df = _remove_duplicates(pd.DataFrame([entry]))
+            ret_df = _remove_duplicates(ret_df)
+            ret_df = pd.concat([_df, ret_df], sort=False, ignore_index=True).fillna(0)
+
+
+        return ret_df
+
+    def _generate_dataframe(self, processed_payload_data):
+        '''Iterate through the processed payload data and create a combined
+        dataframe that can be used for analysis'''
+
+        data = processed_payload_data
+        # Columns that will always have values
+        #static_col_names = self.static_col_names
+        ret_df = pd.DataFrame()
+
+        # For results from each cpu core process
+        for mp_results in processed_payload_data:
+            for entry in mp_results:
+                _df = pd.DataFrame([entry])
+                ret_df = pd.concat([ret_df, _df], ignore_index=True)
+
+        return data, ret_df
 
     def _get_mp_pool_slices(self):
         '''Helper function to seperate the number of files in seperate
@@ -163,19 +388,33 @@ class EmailProcessing:
         return pool
 
     def _mp_executor(self, file_list):
-        '''Function Execution Director for multiprocssing'''
+        '''Function Execution Director for multiprocssing. Any NON-ML
+        parsing / feature creating function can be added to here.'''
         # Process the emails
-        email_contents = self._read_email_contents(file_list)
-        # Create a word list from the payload data
-        email_data = self._create_word_symbol_list(email_contents)
+        email_collection = self._read_email_contents(file_list)
+        # Generate different stats for each email
+        email_collection = self._create_payload_stats(email_collection)
+        # Turn the dictionarys into dataframes
+        email_df = self._prepare_dict_for_df(email_collection)
 
-        return email_data
+        return email_df
 
-    def process(self, path_to_email_dirs=None):
+    def process(self, path_to_email_dirs, n_jobs=None):
         '''Iterate through the emails process the information.
+        Params:
+            path_to_email_dir str : absolute path to directory containing emails
+            n_jobs int : number of cores to use.
+                Default = Use all avaiable cores
         Returns:
         pandas DataFrame
         '''
+        # Set core count if n_jobs is pass
+        if n_jobs is not None:
+            if n_jobs == -1:
+                self.cpu_core_count = m_proc.cpu_count()
+            else:
+                self.cpu_core_count = int(n_jobs)
+
         # Set path to email samples
         self.path = path_to_email_dirs
         # Build list of file paths to iterate through
@@ -192,11 +431,16 @@ class EmailProcessing:
         for key in process_slices:
             process_pool.append(process_slices[key])
 
-        # Run multiprocessing using the Pool API
+        # Run multiprocessing using the Pool API. From this point the internal
+        # _mp_executer will control the pipeline of each process until a
+        # dataframe is returned
         with Pool(self.cpu_core_count) as p:
             pool_results = p.map(self._mp_executor, process_pool)
 
-        return pool_results
+        # Create a dataframe from the processed emails
+        self.combined_data = self._generate_dataframe(pool_results)
+
+        return self.combined_data
 
 
 if __name__ == "__main__":
@@ -221,7 +465,7 @@ if __name__ == "__main__":
         if os.path.exists(dflt_path):
             dir_loc = dflt_path
         else:
-            raise Exception("Error: diabetic_data.csv could not be found.",
+            raise Exception("Error: Spam Directory could not be found.",
                             "Please specifiy location using --directory ")
 
     # Can't find input files. Raise exception
@@ -236,7 +480,7 @@ if __name__ == "__main__":
 
     # Create EmailProcessing instance
     email_info = EmailProcessing()
-    data = email_info.process(dflt_path)
+    dict_data, email_df = email_info.process(dflt_path, n_jobs=-1)
 
     # end timer
     end_time = time.perf_counter()
