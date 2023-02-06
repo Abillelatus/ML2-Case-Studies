@@ -1,3 +1,3 @@
-# ML2-Case-Studies
+# QTW-Case-Studies
 
 Nothing to see here....
