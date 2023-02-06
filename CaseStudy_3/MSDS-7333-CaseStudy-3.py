@@ -12,6 +12,7 @@ import time
 import email
 import argparse
 import pandas as pd
+import numpy as np
 from io import StringIO
 import multiprocessing as m_proc
 from multiprocessing import Pool
@@ -76,6 +77,13 @@ class EmailProcessing:
 
         def get_data(self):
             return self.text.getvalue()
+
+    def _log(self, x):
+        '''Logging formatter'''
+        try:
+            print('[EmailProcessing] > {}'.format(str(x)))
+        except Exception as err:
+            print(err)
 
     def _build_file_path_list(self):
         '''Walk through the root folder and build a list of absolute paths to
@@ -225,27 +233,22 @@ class EmailProcessing:
                                     # If only the first letter is capitalized
                                     first_letter_cap += 1
 
-                            '''
                             # Add to the dictionary of words
                             # Check if word is longer than len 15, and create
                             # It's own dictionary for that
-                            if len(words[word]) > 12:
+                            min_word_len = 4
+                            max_word_len = 12
+                            if len(words[word]) > max_word_len:
                                 if 'large_str' in word_count:
                                     word_count['large_str'] += 1
                                 else:
                                     word_count['large_str'] = 1
-                            # Check unicode to catch other languages that is
-                            # not basic latic.
-                            if words[word] not in re.findall(r'[0000—007F]+', words[word]):
-                                if 'non_basic_latin' in word_count:
-                                    word_count['non_basic_latin'] += 1
+                            # Check for min word length
+                            elif len(words[word]) >= min_word_len:
+                                if words[word].lower() in word_count:
+                                    word_count[words[word].lower()] += 1
                                 else:
-                                    word_count['non_basic_latin'] = 1
-                            '''
-                            if words[word].lower() in word_count:
-                                word_count[words[word].lower()] += 1
-                            else:
-                                word_count[words[word].lower()] = 1
+                                    word_count[words[word].lower()] = 1
 
                     # Get all the symbols in the payload
                     for char in wrk_pyld[line]:
@@ -289,17 +292,14 @@ class EmailProcessing:
     def _prepare_dict_for_df(self, e_data_dict):
         '''Prepares the dictionary to be more easily integrated with the
         delivered dataframe'''
-        ret_lst = []
+        ret_dict = {}
         # Start with static columns that should appear first
         _static_col_names = [
             'line_count', 'avg_line_len',
             'total_words', 'total_symbols', 'all_cap_words',
             'first_letter_cap']
 
-        # List of all words and symbols to create columns for faster
-        # processing
-        word_list = set()
-        symbol_list = set()
+        dict_i = 0  # Counter for appending
 
         for key in e_data_dict.keys():
             _tmp_dict = dict()
@@ -309,62 +309,41 @@ class EmailProcessing:
             for col in _static_col_names:
                 _tmp_dict[col] = e_data_dict[key][3]['stats'][col]
 
-            # Now Add the symbols and word list
-            '''
+            # Add words to the _tmp dict
             for word in e_data_dict[key][3]['stats']['word_count'].keys():
                 _words = e_data_dict[key][3]['stats']['word_count']
                 _tmp_dict[word] = _words[word]
-                word_list.add(word)
-            '''
+            # Add symbols to the _tmp dict
             for smbl in e_data_dict[key][3]['stats']['symbol_count'].keys():
                 _smbl = e_data_dict[key][3]['stats']['symbol_count']
                 _tmp_dict[smbl] = _smbl[smbl]
-                symbol_list.add(smbl)
 
-            ret_lst.append(_tmp_dict)
+            ret_dict[dict_i] = _tmp_dict
+            dict_i += 1
 
-        _static_col_names.insert(0, 'filename')
-        _static_col_names.insert(1, 'is_spam')
+        return ret_dict
 
-        for _word in list(word_list):
-            _static_col_names.append(_word)
-        for _symb in list(symbol_list):
-            _static_col_names.append(_symb)
-
-        # Turn the list of dicts into a dataframe
-        ret_df = pd.DataFrame(columns=_static_col_names)
-
-        def _remove_duplicates(dataframe):
-            '''Check for and remove duplicate columns to mitigate the pandas
-            InvalideIndexError: exception'''
-            _ret_df = dataframe.loc[:, ~dataframe.columns.duplicated()].copy()
-
-            return _ret_df
-
-        for entry in ret_lst:
-            _df = _remove_duplicates(pd.DataFrame([entry]))
-            ret_df = _remove_duplicates(ret_df)
-            ret_df = pd.concat([_df, ret_df], sort=False, ignore_index=True).fillna(0)
-
-
-        return ret_df
-
-    def _generate_dataframe(self, processed_payload_data):
+    def _generate_dataframe(self, processed_payload_dicts):
         '''Iterate through the processed payload data and create a combined
         dataframe that can be used for analysis'''
+        ppd = processed_payload_dicts  # Create smaller name
+        combined_dict = dict()
+        dict_i = 0  # Iterator for key value in combined dataframe
 
-        data = processed_payload_data
-        # Columns that will always have values
-        #static_col_names = self.static_col_names
-        ret_df = pd.DataFrame()
+        # Loop through each returned dictionary and add every entry to the
+        # combined_dict variable. The number of returned dictionaries is equal
+        # to the number of n_jobs defined.
+        for result in range(len(ppd)):
+            for val in ppd[result]:
+                combined_dict[dict_i] = ppd[result].get(val)
+                dict_i += 1
 
-        # For results from each cpu core process
-        for mp_results in processed_payload_data:
-            for entry in mp_results:
-                _df = pd.DataFrame([entry])
-                ret_df = pd.concat([ret_df, _df], ignore_index=True)
+        # Turn the list of dicts into a dataframe
+        ret_df = pd.DataFrame.from_dict(combined_dict, "index")
+        # Replace the nan's with 0's
+        ret_df = ret_df.replace(np.nan, 0)
 
-        return data, ret_df
+        return ret_df
 
     def _get_mp_pool_slices(self):
         '''Helper function to seperate the number of files in seperate
@@ -394,10 +373,11 @@ class EmailProcessing:
         email_collection = self._read_email_contents(file_list)
         # Generate different stats for each email
         email_collection = self._create_payload_stats(email_collection)
-        # Turn the dictionarys into dataframes
-        email_df = self._prepare_dict_for_df(email_collection)
+        # Create formated dictionaries that will be used to create a combined
+        # dataframe
+        email_data_dicts = self._prepare_dict_for_df(email_collection)
 
-        return email_df
+        return email_data_dicts
 
     def process(self, path_to_email_dirs, n_jobs=None):
         '''Iterate through the emails process the information.
@@ -408,6 +388,7 @@ class EmailProcessing:
         Returns:
         pandas DataFrame
         '''
+        self._log('Reading Emails and generating Dataframe...')
         # Set core count if n_jobs is pass
         if n_jobs is not None:
             if n_jobs == -1:
@@ -439,6 +420,8 @@ class EmailProcessing:
 
         # Create a dataframe from the processed emails
         self.combined_data = self._generate_dataframe(pool_results)
+
+        self._log("Complete...")
 
         return self.combined_data
 
@@ -475,16 +458,17 @@ if __name__ == "__main__":
             "location using --directory ")
 
         raise Exception(input_err)
-
+    # Start timer
     start_time = time.perf_counter()
 
     # Create EmailProcessing instance
-    email_info = EmailProcessing()
-    dict_data, email_df = email_info.process(dflt_path, n_jobs=-1)
+    email_obj = EmailProcessing()
+    email_data_df = email_obj.process(dflt_path, n_jobs=-1)
 
     # end timer
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
 
-    print(elapsed_time)
+    print('Total time to generate DataFrame: {}'.format(
+        round(elapsed_time, 2)))
 
