@@ -3,13 +3,14 @@
 """
 Created on Tue Jan 31 08:49:00 2023
 
-@author: xclusive
+@author: Ryan Herrin, Luke Stodgel
 """
 
 import re
 import os
 import time
 import email
+import pickle
 import argparse
 import pandas as pd
 import numpy as np
@@ -17,11 +18,15 @@ from io import StringIO
 import multiprocessing as m_proc
 from multiprocessing import Pool
 from html.parser import HTMLParser
+from matplotlib import pyplot as plt
+from matplotlib.ticker import FuncFormatter
+from sklearn.model_selection import GridSearchCV  # KFold, cross_val_score
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import f1_score
+from sklearn.naive_bayes import MultinomialNB
+from sklearn import metrics as mt
 
-
-# Hardcoded path for testing
-dflt_path = ('/home/xclusive/rTek/School/SMU/MSDS_7333_Quantifying_The_World/'
-             'QTW-Case-Studies/Datasets/SpamMessages')
 
 # Description for program
 program_desc = '''Program to train a model to identify email spam that could
@@ -61,6 +66,7 @@ class EmailProcessing:
         self.cpu_core_count = m_proc.cpu_count()
         self.combined_data = None
         self.static_col_names = None
+        self.email_df = None
 
     class MLStripper(HTMLParser):
         '''Inner class to handle html parsing/stripping of some emails'''
@@ -343,7 +349,31 @@ class EmailProcessing:
         # Replace the nan's with 0's
         ret_df = ret_df.replace(np.nan, 0)
 
+        # Save a copy to the object
+        self.email_df = ret_df
+
         return ret_df
+
+    def export_dataframe_to_binary(self):
+        '''Export the dataframe to a binary file for faster debugging'''
+        outfile_loc = os.getcwd() + '/email_df.bin'
+        try:
+            with open(outfile_loc, 'wb') as outfile:
+                pickle.dump(self.email_df, outfile)
+
+        except Exception as err:
+            self._log('Error Exporting binary data...')
+            self._log(str(err))
+
+    def import_dataframe_from_binary(self, bin_file):
+        '''Import a previously saved binary file'''
+        try:
+            with open(bin_file, 'rb') as infile:
+                self.email_df = pickle.load(infile)
+
+        except Exception as err:
+            self._log('Error Importing binary data...')
+            self._log(str(err))
 
     def _get_mp_pool_slices(self):
         '''Helper function to seperate the number of files in seperate
@@ -382,14 +412,15 @@ class EmailProcessing:
     def process(self, path_to_email_dirs, n_jobs=None):
         '''Iterate through the emails process the information.
         Params:
-            path_to_email_dir str : absolute path to directory containing emails
+            path_to_email_dir str : absolute path to directory containing
+                emails
             n_jobs int : number of cores to use.
                 Default = Use all avaiable cores
         Returns:
         pandas DataFrame
         '''
         self._log('Reading Emails and generating Dataframe...')
-        # Set core count if n_jobs is pass
+        # Set core count if n_jobs is pass3
         if n_jobs is not None:
             if n_jobs == -1:
                 self.cpu_core_count = m_proc.cpu_count()
@@ -426,16 +457,194 @@ class EmailProcessing:
         return self.combined_data
 
 
+def get_best_threshold(df, params, show_chart=True):
+    '''Find the best threshold percentage for obtaining the fewest false
+    positives. Returns Threshold value and model'''
+    X = df.drop(['is_spam', 'filename'], axis=1)
+    y = df['is_spam']
+    # Create test train split data
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, shuffle=True
+    )
+
+    # Create predictions using probability
+    mnb = MultinomialNB(**params)
+    mnb.fit(X_train, y_train)
+    y_pred = mnb.predict_proba(X_test)  # [:, 1] >= .50
+
+    # Metric container
+    metrics = pd.DataFrame(columns=['accuracy', 'precision', 'recall', 'f1'])
+    prec_m_score = []
+
+    # Run through the thresholds and extract the scores
+    for thrshlds in range(1, 100, 1):
+        thrshld = thrshlds / 100
+        tmp_y_pred = y_pred[:, 1] >= thrshld
+        tmp_y_pred = np.where(tmp_y_pred, 1, 0)
+
+        # Get and append metrics
+        tmp_metric = []
+        tmp_metric.append(accuracy_score(y_test, tmp_y_pred))
+        tmp_metric.append(precision_score(y_test, tmp_y_pred))
+        tmp_metric.append(recall_score(y_test, tmp_y_pred))
+        tmp_metric.append(f1_score(y_test, tmp_y_pred))
+
+        prec_m_score.append(precision_score(y_test, tmp_y_pred))
+
+        # Append to metric container
+        metrics.loc[len(metrics)] = tmp_metric
+
+    ax = metrics.plot(figsize=(12, 5), title='Prediction Threshold Scores')
+    # Sets the y-axis to be based on a percentage
+    ax.yaxis.set_major_formatter(
+        FuncFormatter(lambda y, _: '{:.0%}'.format(y))
+    )
+    ax.set_xlabel("Threshold Amount (as percentage)")
+
+    return prec_m_score.index(max(prec_m_score)) / 100
+
+
+def get_best_params(w_dataframe):
+    # Split the data into X and y
+    X_scaled = w_dataframe.drop(['is_spam', 'filename'], axis=1)
+    y = w_dataframe['is_spam']
+
+    # Create standard range
+    # Define the parameter grid to search over
+    param_grid = {
+        'alpha': [0.01, 0.1, 1.0],
+        'fit_prior': [True, False]
+    }
+
+    # Create a MultinomialNB classifier
+    mnb = MultinomialNB()
+
+    # Create a GridSearchCV object
+    grid_search = GridSearchCV(mnb,
+                               param_grid,
+                               scoring='precision',
+                               cv=5)
+
+    # Fit the grid search to the data
+    grid_search.fit(X_scaled, y)
+
+    return(grid_search.best_params_)
+
+
+def get_NB_results_and_plots(dataframe, best_params, thresh, num_tests):
+    '''Get the mse of the lasso model with multiple runs'''
+    # Split the data into train and test sets
+    X = dataframe.drop(['is_spam', 'filename'], axis=1)
+    y = dataframe['is_spam']
+
+    # Names for the charts
+    names = ['Accuracy', 'Precision', 'Recall', 'F1']
+
+    # Container to hold the means
+    mnb_accuracy_means = []
+    mnb_precision_means = []
+    mnb_recall_means = []
+    mnb_f1_means = []
+    # mnb_auc_means = []
+
+    # Container used to feed into charts
+    mean_values = []
+
+    # Run the model with final stats multiple times to get a mean of all
+    for run in range(num_tests):
+        # Create test train split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, shuffle=True
+        )
+
+        # Instantiate a Multinomial Naive Bayes Model
+        mnb_model = MultinomialNB(**best_params)
+
+        # There scores
+        # Fit the Model to the data
+        mnb_model.fit(X_train, y_train)
+
+        # find the best threshold
+        threshold = thresh
+
+        # calculate class labels using probabilities
+        y_hat = mnb_model.predict_proba(X_test)[:, 1] >= threshold
+        y_hat = np.where(y_hat, 1, 0)
+
+        # Compute the metrics of the MultinomialNB model
+        # fpr, tpr, thresholds = mt.roc_curve(y_test, y_hat_proba, pos_label=1)
+        mnb_accuracy_means.append(round(accuracy_score(y_test, y_hat), 3))
+        mnb_precision_means.append(round(precision_score(y_test, y_hat), 3))
+        mnb_recall_means.append(round(recall_score(y_test, y_hat), 3))
+        mnb_f1_means.append(round(mt.f1_score(y_test, y_hat), 3))
+
+    mean_values.append(np.mean(mnb_accuracy_means))
+    mean_values.append(np.mean(mnb_precision_means))
+    mean_values.append(np.mean(mnb_recall_means))
+    mean_values.append(np.mean(mnb_f1_means))
+
+    # Create the barplot figure
+    fig, ax = plt.subplots()
+    bars = ax.barh(names, mean_values)
+    ax.bar_label(bars)
+    plt.yticks(names)
+    plt.title(
+        'Average Mean Scores. MultinomialNB |'
+        ' params={} | ProbThreshold = {} |'
+        ' Num_Runs={}'.format(str(best_params), threshold, num_tests))
+    plt.xlabel('Percentage', fontsize=11, color='blue')
+    plt.ylabel('Metrics', fontsize=11, color='blue')
+    plt.show()
+
+    # Create list of lists for the boxplot
+    values = [mnb_accuracy_means, mnb_precision_means, mnb_recall_means,
+              mnb_f1_means]
+
+    # Create Boxplot of model metric variances
+    bx_plt = plt.figure()
+    bx_plt.suptitle('Model Metric Variances over {} runs'.format(num_tests))
+    ax = bx_plt.add_subplot(111)
+    plt.boxplot(values)
+    plt.grid()
+    plt.tight_layout(pad=1.5)
+    ax.set_xticklabels(names)
+    plt.xlabel('Model Metric',
+               fontsize=11, color='blue')
+    plt.ylabel('Score (as a percentage)', fontsize=11, color='blue')
+    plt.show()
+
+    return values
+
+
+def display_model_metrics(metrics):
+    '''Print out formatted metrics for the model'''
+    # Get the means
+    acc_mean = round(np.mean(metrics[0]), 3)
+    prec_mean = round(np.mean(metrics[1]), 3)
+    rec_mean = round(np.mean(metrics[2]), 3)
+    f1_mean = round(np.mean(metrics[3]), 3)
+    # Get the variance
+    acc_var = round(np.var(metrics[0]), 6)
+    prec_var = round(np.var(metrics[1]), 6)
+    rec_var = round(np.var(metrics[2]), 6)
+    f1_var = round(np.var(metrics[3]), 6)
+
+    print()
+    print('Accuracy:  Mean = {} | Variance = {}'.format(acc_mean, acc_var))
+    print('Precision: Mean = {} | Variance = {}'.format(prec_mean, prec_var))
+    print('Recall:    Mean = {} | Variance = {}'.format(rec_mean, rec_var))
+    print('F1_Score:  Mean = {} | Variance = {}'.format(f1_mean, f1_var))
+    print()
+
+
 if __name__ == "__main__":
     # Grab arguments
     parser = argparse.ArgumentParser(description=program_desc)
     parser.add_argument(
-        "-d", "--directory", help="Path to diabetic_data.csv", metavar='\b')
+        "-d", "--directory", help="Path to Spam Directory", metavar='\b')
     args = parser.parse_args()
 
-    # If arguments are provided then treat them as the defualt location for
-    # input files. Other-wise we will check if the files are in the default
-    # location. Raise an exception if no files are found.
+    # Raise an exception if directory path does not exist.
     if args.directory is not None:
         # Validate paths
         if os.path.exists(args.directory):
@@ -443,27 +652,20 @@ if __name__ == "__main__":
         else:
             raise Exception("Input files could not be found...")
 
-    # If no arguments are provided, see if file is in default location
-    elif args.directory is None:
-        if os.path.exists(dflt_path):
-            dir_loc = dflt_path
-        else:
-            raise Exception("Error: Spam Directory could not be found.",
-                            "Please specifiy location using --directory ")
-
     # Can't find input files. Raise exception
     else:
         input_err = (
-            "Error: diabetic_data.csv could not be found. Please specifiy",
-            "location using --directory ")
+            "Error: Spam Directory could not be found. Please specifiy"
+            " location using --directory ")
 
         raise Exception(input_err)
+
     # Start timer
     start_time = time.perf_counter()
 
     # Create EmailProcessing instance
     email_obj = EmailProcessing()
-    email_data_df = email_obj.process(dflt_path, n_jobs=-1)
+    email_data_df = email_obj.process(args.directory, n_jobs=-1)
 
     # end timer
     end_time = time.perf_counter()
@@ -472,3 +674,24 @@ if __name__ == "__main__":
     print('Total time to generate DataFrame: {}'.format(
         round(elapsed_time, 2)))
 
+    mnb_params = get_best_params(email_data_df)
+
+    # Get the threshold
+    results = []
+    thrsh_runs = 5
+    for i in range(thrsh_runs):
+        mnb_threshold = get_best_threshold(
+            email_data_df, mnb_params, show_chart=False
+        )
+        results.append(mnb_threshold)
+
+    threshold_avg = sum(results) / len(results)
+    print("average threshold:", threshold_avg)
+
+    model_metrics = get_NB_results_and_plots(
+        email_data_df, mnb_params, threshold_avg, 5
+    )
+
+    display_model_metrics(model_metrics)
+
+    print("Complete...")
