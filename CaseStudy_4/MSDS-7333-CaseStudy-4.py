@@ -49,6 +49,8 @@ def create_data(path, create_csv=False):
         master_data_list[indx] = master_data_list[indx].split(',')
         # Change from string to float
         for val in range(len(master_data_list[indx])):
+            # The first if and elif handles the missing data if present
+            # Transforms missing data into np.nan
             if master_data_list[indx][val] == '?':
                 master_data_list[indx][val] = np.nan
 
@@ -69,6 +71,23 @@ def create_data(path, create_csv=False):
         num_na = df[col].isnull().sum()
         log_str = log_str + '{}: {}\n'.format(col, num_na)
 
+    # Remove rows where the taget is na, because we need to train with
+    # supervised data
+    df = df[df['target'] != np.nan]
+
+    # Impute missing data
+    imputer = KNNImputer(n_neighbors=2, missing_values=np.nan)
+    imputed_data = imputer.fit_transform(df)
+    ret_df = pd.DataFrame(imputed_data, columns=headers)
+
+    # Post impute log update
+    log_str = log_str + ('\n' * 3) + ('---' * 20) + ('\n' * 3)
+    log_str = log_str + 'Post Impute NA values\n------------------\n'
+    for col in df.columns:
+        # Get number of na values per column
+        num_na = ret_df[col].isnull().sum()
+        log_str = log_str + '{}: {}\n'.format(col, num_na)
+
     # Write missing data values to log file
     try:
         with open(os.getcwd() + '/na_log.txt', 'w') as outfile:
@@ -78,15 +97,6 @@ def create_data(path, create_csv=False):
     except Exception as err:
         print('[Error] Could not create na_log files')
         print(str(err))
-
-    # Remove rows where the taget is na, because we need to train with
-    # supervised data
-    df = df[df['target'] != np.nan]
-
-    # Impute missing data
-    imputer = KNNImputer(n_neighbors=2, missing_values=np.nan)
-    imputed_data = imputer.fit_transform(df)
-    ret_df = pd.DataFrame(imputed_data, columns=headers)
 
     # Create an output csv if create_csv is true
     if create_csv:
@@ -106,10 +116,10 @@ def load_csv(csv_path):
 
 
 if __name__ == "__main__":
-    # dir_path = '../Datasets/CS4_data'
-    # bnk_data = create_data(dir_path, create_csv=True)
-    combined_csv_path = './combined.csv'
-    bnk_data = load_csv(combined_csv_path)
+    dir_path = '../Datasets/CS4_data'
+    bnk_data = create_data(dir_path, create_csv=True)
+    # combined_csv_path = './combined.csv'
+    # bnk_data = load_csv(combined_csv_path)
 
 
 
