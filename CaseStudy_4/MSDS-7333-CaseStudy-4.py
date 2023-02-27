@@ -11,19 +11,30 @@ Created on Fri Feb 17 15:15:40 2023
 @author: Ryan Herrin, Luke Stodgel
 """
 import os
+import argparse
 import numpy as np
 import pandas as pd
 from sklearn.impute import KNNImputer
 import xgboost as xgb
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import RandomizedSearchCV, train_test_split, cross_val_score, cross_val_predict, KFold
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from matplotlib.ticker import FuncFormatter
+# from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import train_test_split
+# from sklearn.model_selection import cross_val_score, cross_val_predict, KFold
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+# from sklearn.metrics import f1_score
+# from matplotlib.ticker import FuncFormatter
 from matplotlib import pyplot as plt
 from sklearn import metrics as mt
 
 
-def create_data(path, create_csv=False):
+program_desc = """
+CaseStudy 4: Script that takes in financial data provided from a bank and uses
+a Random Forest model and an XGBoost model to determine whether the company
+will go bankrupt or not.
+"""
+
+
+def create_data(path, create_csv=False, create_na_log=True):
     """Read in the financial data and return a pandas Dataframe object of the
     data. Param "path" should be the root directory that holds the individual
     files. "create_csv" will export a csv of the combined data if set to True.
@@ -45,6 +56,7 @@ def create_data(path, create_csv=False):
 
     # Read in the data from the files
     for file in raw_files:
+        print('Loading {}'.format(file))
         with open(file, 'r') as infile:
             file_data = infile.read().splitlines()
             # Find the index where the data starts
@@ -83,9 +95,11 @@ def create_data(path, create_csv=False):
     df = df[df['target'] != np.nan]
 
     # Impute missing data
+    print("Imputing Missing Data Using KNNImputer...")
     imputer = KNNImputer(n_neighbors=2, missing_values=np.nan)
     imputed_data = imputer.fit_transform(df)
     ret_df = pd.DataFrame(imputed_data, columns=headers)
+    print("Imputing Complete...")
 
     # Post impute log update
     log_str = log_str + ('\n' * 3) + ('---' * 20) + ('\n' * 3)
@@ -95,15 +109,16 @@ def create_data(path, create_csv=False):
         num_na = ret_df[col].isnull().sum()
         log_str = log_str + '{}: {}\n'.format(col, num_na)
 
-    # Write missing data values to log file
-    try:
-        with open(os.getcwd() + '/na_log.txt', 'w') as outfile:
-            outfile.write(log_str)
-            outfile.close()
+    if create_na_log:
+        # Write missing data values to log file
+        try:
+            with open(os.getcwd() + '/na_log.txt', 'w') as outfile:
+                outfile.write(log_str)
+                outfile.close()
 
-    except Exception as err:
-        print('[Error] Could not create na_log files')
-        print(str(err))
+        except Exception as err:
+            print('[Error] Could not create na_log files')
+            print(str(err))
 
     # Create an output csv if create_csv is true
     if create_csv:
@@ -120,7 +135,8 @@ def load_csv(csv_path):
 
     except Exception as err:
         print(str(err))
-        
+
+
 def display_model_metrics(metrics):
     '''Print out formatted metrics for the model'''
     # Get the means
@@ -140,23 +156,26 @@ def display_model_metrics(metrics):
     print('Recall:    Mean = {} | Variance = {}'.format(rec_mean, rec_var))
     print('F1_Score:  Mean = {} | Variance = {}'.format(f1_mean, f1_var))
     print()
-    
-    
-    
-def get_rf_results_and_plots(dataframe, best_params, thresh, num_tests):
-    '''Get the mse of the lasso model with multiple runs'''
+
+
+def get_model_results_and_plots(
+        dataframe, model, best_params, thresh, num_tests):
+    '''Common function to get results from a passed model'''
     # Split the DataFrame into training and testing sets
-    X = dataframe.drop('target', axis=1)  # Remove the 'target' column from the DataFrame and assign the result to X
-    y = dataframe['target'].astype(int)  # Assign the 'target' column to y
+
+    # Remove the 'target' column from the DataFrame and assign the result to X
+    X = dataframe.drop('target', axis=1)
+    # Assign the 'target' column to y
+    y = dataframe['target'].astype(int)
 
     # Names for the charts
     names = ['Accuracy', 'Precision', 'Recall', 'F1']
 
     # Container to hold the means
-    mnb_accuracy_means = []
-    mnb_precision_means = []
-    mnb_recall_means = []
-    mnb_f1_means = []
+    accuracy_means = []
+    precision_means = []
+    recall_means = []
+    f1_means = []
     # mnb_auc_means = []
 
     # Container used to feed into charts
@@ -169,294 +188,59 @@ def get_rf_results_and_plots(dataframe, best_params, thresh, num_tests):
             X, y, test_size=0.2, shuffle=True
         )
 
-        # Instantiate a Multinomial Naive Bayes Model
-        rf_model = RandomForestClassifier(**best_params)
+        # Instantiate a model from the params
+        test_model = model(**best_params)
 
         # There scores
         # Fit the Model to the data
-        rf_model.fit(X_train, y_train)
+        test_model.fit(X_train, y_train)
 
-        # find the best threshold
-        threshold = thresh
+        # If a threshold was provided then use it
+        if thresh is not None:
+            # find the best threshold
+            threshold = thresh
+            # calculate class labels using probabilities
+            y_hat = test_model.predict_proba(X_test)[:, 1] >= threshold
+            y_hat = np.where(y_hat, 1, 0)
 
-        # calculate class labels using probabilities
-        y_hat = rf_model.predict_proba(X_test)[:, 1] >= threshold
-        y_hat = np.where(y_hat, 1, 0)
+        else:
+            y_hat = test_model.predict(X_test)
 
-        # Compute the metrics of the MultinomialNB model
+        # Compute the metrics of the model
         # fpr, tpr, thresholds = mt.roc_curve(y_test, y_hat_proba, pos_label=1)
-        mnb_accuracy_means.append(round(accuracy_score(y_test, y_hat), 3))
-        mnb_precision_means.append(round(precision_score(y_test, y_hat), 3))
-        mnb_recall_means.append(round(recall_score(y_test, y_hat), 3))
-        mnb_f1_means.append(round(mt.f1_score(y_test, y_hat), 3))
+        accuracy_means.append(round(accuracy_score(y_test, y_hat), 3))
+        precision_means.append(round(precision_score(y_test, y_hat), 3))
+        recall_means.append(round(recall_score(y_test, y_hat), 3))
+        f1_means.append(round(mt.f1_score(y_test, y_hat), 3))
 
-    mean_values.append(np.mean(mnb_accuracy_means))
-    mean_values.append(np.mean(mnb_precision_means))
-    mean_values.append(np.mean(mnb_recall_means))
-    mean_values.append(np.mean(mnb_f1_means))
+    mean_values.append(np.mean(accuracy_means))
+    mean_values.append(np.mean(precision_means))
+    mean_values.append(np.mean(recall_means))
+    mean_values.append(np.mean(f1_means))
 
     # Create the barplot figure
     fig, ax = plt.subplots()
     bars = ax.barh(names, mean_values)
     ax.bar_label(bars)
     plt.yticks(names)
-    plt.title(
-        'Average Mean Scores. MultinomialNB |'
-        ' params={} | ProbThreshold = {} |'
-        ' Num_Runs={}'.format(str(best_params), threshold, num_tests))
+
+    # Seperate titles if using threshold or not
+    if thresh is not None:
+        plt.title(
+            'Average Mean Scores |'
+            ' ProbThreshold = {} |'
+            ' Num_Runs={}'.format(threshold, num_tests))
+    else:
+        plt.title(
+            'Average Mean Scores |'
+            ' Num_Runs={}'.format(num_tests))
+
     plt.xlabel('Percentage', fontsize=11, color='blue')
     plt.ylabel('Metrics', fontsize=11, color='blue')
     plt.show()
 
     # Create list of lists for the boxplot
-    values = [mnb_accuracy_means, mnb_precision_means, mnb_recall_means,
-              mnb_f1_means]
-
-    # Create Boxplot of model metric variances
-    bx_plt = plt.figure()
-    bx_plt.suptitle('Model Metric Variances over {} runs'.format(num_tests))
-    ax = bx_plt.add_subplot(111)
-    plt.boxplot(values)
-    plt.grid()
-    plt.tight_layout(pad=1.5)
-    ax.set_xticklabels(names)
-    plt.xlabel('Model Metric',
-               fontsize=11, color='blue')
-    plt.ylabel('Score (as a percentage)', fontsize=11, color='blue')
-    plt.show()
-
-    return values
-
-def get_rf_results_and_plots_trad(dataframe, best_params, num_tests):
-    '''Get the mse of the lasso model with multiple runs'''
-    # Split the DataFrame into training and testing sets
-    X = dataframe.drop('target', axis=1)  # Remove the 'target' column from the DataFrame and assign the result to X
-    y = dataframe['target'].astype(int)  # Assign the 'target' column to y
-
-    # Names for the charts
-    names = ['Accuracy', 'Precision', 'Recall', 'F1']
-
-    # Container to hold the means
-    mnb_accuracy_means = []
-    mnb_precision_means = []
-    mnb_recall_means = []
-    mnb_f1_means = []
-    # mnb_auc_means = []
-
-    # Container used to feed into charts
-    mean_values = []
-
-    # Run the model with final stats multiple times to get a mean of all
-    for run in range(num_tests):
-        # Create test train split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, shuffle=True
-        )
-
-        # Instantiate a Multinomial Naive Bayes Model
-        rf_model = RandomForestClassifier(**best_params)
-
-        # There scores
-        # Fit the Model to the data
-        rf_model.fit(X_train, y_train)
-
-
-        # Make predictions on the testing set
-        y_hat = rf_model.predict(X_test)
-
-        # Compute the metrics of the MultinomialNB model
-        # fpr, tpr, thresholds = mt.roc_curve(y_test, y_hat_proba, pos_label=1)
-        mnb_accuracy_means.append(round(accuracy_score(y_test, y_hat), 3))
-        mnb_precision_means.append(round(precision_score(y_test, y_hat), 3))
-        mnb_recall_means.append(round(recall_score(y_test, y_hat), 3))
-        mnb_f1_means.append(round(mt.f1_score(y_test, y_hat), 3))
-
-    mean_values.append(np.mean(mnb_accuracy_means))
-    mean_values.append(np.mean(mnb_precision_means))
-    mean_values.append(np.mean(mnb_recall_means))
-    mean_values.append(np.mean(mnb_f1_means))
-
-    # Create the barplot figure
-    fig, ax = plt.subplots()
-    bars = ax.barh(names, mean_values)
-    ax.bar_label(bars)
-    plt.yticks(names)
-    plt.title(
-        'Average Mean Scores. MultinomialNB |'
-        ' params={} |'
-        ' Num_Runs={}'.format(str(best_params), num_tests))
-    plt.xlabel('Percentage', fontsize=11, color='blue')
-    plt.ylabel('Metrics', fontsize=11, color='blue')
-    plt.show()
-
-    # Create list of lists for the boxplot
-    values = [mnb_accuracy_means, mnb_precision_means, mnb_recall_means,
-              mnb_f1_means]
-
-    # Create Boxplot of model metric variances
-    bx_plt = plt.figure()
-    bx_plt.suptitle('Model Metric Variances over {} runs'.format(num_tests))
-    ax = bx_plt.add_subplot(111)
-    plt.boxplot(values)
-    plt.grid()
-    plt.tight_layout(pad=1.5)
-    ax.set_xticklabels(names)
-    plt.xlabel('Model Metric',
-               fontsize=11, color='blue')
-    plt.ylabel('Score (as a percentage)', fontsize=11, color='blue')
-    plt.show()
-
-    return values
-
-def get_xgb_results_and_plots(dataframe, best_params, thresh, num_tests):
-    '''Get the mse of the lasso model with multiple runs'''
-    # Split the DataFrame into training and testing sets
-    X = dataframe.drop('target', axis=1)  # Remove the 'target' column from the DataFrame and assign the result to X
-    y = dataframe['target'].astype(int)  # Assign the 'target' column to y
-
-    # Names for the charts
-    names = ['Accuracy', 'Precision', 'Recall', 'F1']
-
-    # Container to hold the means
-    mnb_accuracy_means = []
-    mnb_precision_means = []
-    mnb_recall_means = []
-    mnb_f1_means = []
-    # mnb_auc_means = []
-
-    # Container used to feed into charts
-    mean_values = []
-
-    # Run the model with final stats multiple times to get a mean of all
-    for run in range(num_tests):
-        # Create test train split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, shuffle=True
-        )
-
-        # Instantiate a Multinomial Naive Bayes Model
-        xgb_model = xgb.XGBClassifier(**best_params)
-
-        # There scores
-        # Fit the Model to the data
-        xgb_model.fit(X_train, y_train)
-
-        # find the best threshold
-        threshold = thresh
-
-        # calculate class labels using probabilities
-        y_hat = xgb_model.predict_proba(X_test)[:, 1] >= threshold
-        y_hat = np.where(y_hat, 1, 0)
-
-        # Compute the metrics of the MultinomialNB model
-        # fpr, tpr, thresholds = mt.roc_curve(y_test, y_hat_proba, pos_label=1)
-        mnb_accuracy_means.append(round(accuracy_score(y_test, y_hat), 3))
-        mnb_precision_means.append(round(precision_score(y_test, y_hat), 3))
-        mnb_recall_means.append(round(recall_score(y_test, y_hat), 3))
-        mnb_f1_means.append(round(mt.f1_score(y_test, y_hat), 3))
-
-    mean_values.append(np.mean(mnb_accuracy_means))
-    mean_values.append(np.mean(mnb_precision_means))
-    mean_values.append(np.mean(mnb_recall_means))
-    mean_values.append(np.mean(mnb_f1_means))
-
-    # Create the barplot figure
-    fig, ax = plt.subplots()
-    bars = ax.barh(names, mean_values)
-    ax.bar_label(bars)
-    plt.yticks(names)
-    plt.title(
-        'Average Mean Scores. MultinomialNB |'
-        ' params={} | ProbThreshold = {} |'
-        ' Num_Runs={}'.format(str(best_params), threshold, num_tests))
-    plt.xlabel('Percentage', fontsize=11, color='blue')
-    plt.ylabel('Metrics', fontsize=11, color='blue')
-    plt.show()
-
-    # Create list of lists for the boxplot
-    values = [mnb_accuracy_means, mnb_precision_means, mnb_recall_means,
-              mnb_f1_means]
-
-    # Create Boxplot of model metric variances
-    bx_plt = plt.figure()
-    bx_plt.suptitle('Model Metric Variances over {} runs'.format(num_tests))
-    ax = bx_plt.add_subplot(111)
-    plt.boxplot(values)
-    plt.grid()
-    plt.tight_layout(pad=1.5)
-    ax.set_xticklabels(names)
-    plt.xlabel('Model Metric',
-               fontsize=11, color='blue')
-    plt.ylabel('Score (as a percentage)', fontsize=11, color='blue')
-    plt.show()
-
-    return values
-
-def get_xgb_results_and_plots_trad(dataframe, best_params, num_tests):
-    '''Get the mse of the lasso model with multiple runs'''
-    # Split the DataFrame into training and testing sets
-    X = dataframe.drop('target', axis=1)  # Remove the 'target' column from the DataFrame and assign the result to X
-    y = dataframe['target'].astype(int)  # Assign the 'target' column to y
-
-    # Names for the charts
-    names = ['Accuracy', 'Precision', 'Recall', 'F1']
-
-    # Container to hold the means
-    mnb_accuracy_means = []
-    mnb_precision_means = []
-    mnb_recall_means = []
-    mnb_f1_means = []
-    # mnb_auc_means = []
-
-    # Container used to feed into charts
-    mean_values = []
-
-    # Run the model with final stats multiple times to get a mean of all
-    for run in range(num_tests):
-        # Create test train split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, shuffle=True
-        )
-
-        # Instantiate a Multinomial Naive Bayes Model
-        xgb_model = xgb.XGBClassifier(**best_params)
-
-        # There scores
-        # Fit the Model to the data
-        xgb_model.fit(X_train, y_train)
-
-
-        # Make predictions on the testing set
-        y_hat = xgb_model.predict(X_test)
-
-        # Compute the metrics of the MultinomialNB model
-        # fpr, tpr, thresholds = mt.roc_curve(y_test, y_hat_proba, pos_label=1)
-        mnb_accuracy_means.append(round(accuracy_score(y_test, y_hat), 3))
-        mnb_precision_means.append(round(precision_score(y_test, y_hat), 3))
-        mnb_recall_means.append(round(recall_score(y_test, y_hat), 3))
-        mnb_f1_means.append(round(mt.f1_score(y_test, y_hat), 3))
-
-    mean_values.append(np.mean(mnb_accuracy_means))
-    mean_values.append(np.mean(mnb_precision_means))
-    mean_values.append(np.mean(mnb_recall_means))
-    mean_values.append(np.mean(mnb_f1_means))
-
-    # Create the barplot figure
-    fig, ax = plt.subplots()
-    bars = ax.barh(names, mean_values)
-    ax.bar_label(bars)
-    plt.yticks(names)
-    plt.title(
-        'Average Mean Scores. MultinomialNB |'
-        ' params={} |'
-        ' Num_Runs={}'.format(str(best_params), num_tests))
-    plt.xlabel('Percentage', fontsize=11, color='blue')
-    plt.ylabel('Metrics', fontsize=11, color='blue')
-    plt.show()
-
-    # Create list of lists for the boxplot
-    values = [mnb_accuracy_means, mnb_precision_means, mnb_recall_means,
-              mnb_f1_means]
+    values = [accuracy_means, precision_means, recall_means, f1_means]
 
     # Create Boxplot of model metric variances
     bx_plt = plt.figure()
@@ -475,65 +259,85 @@ def get_xgb_results_and_plots_trad(dataframe, best_params, num_tests):
 
 
 if __name__ == "__main__":
-    #dir_path = '../Datasets/CS4_data'
-    #bnk_data = create_data(dir_path, create_csv=True)
+    # Grab arguments
+    parser = argparse.ArgumentParser(description=program_desc)
+    parser.add_argument(
+        "-d", "--directory", help="Path to CS4_Directory", metavar='\b')
+    args = parser.parse_args()
+
+    dir_path = ''
+
+    # Validate the directory path exists
+    if args.directory is not None:
+        # Validate paths
+        if os.path.exists(args.directory):
+            # validate blank argument that might default to the home dir
+            if len(args.directory) > 1:
+                dir_path = args.directory
+            else:
+                raise Exception("-d argument cannot be blank...")
+        else:
+            raise Exception("Path Provided does not exists or is invalid...")
+
+    bnk_data = create_data(dir_path, create_csv=False, create_na_log=False)
+
+    # For loading in a csv file that is already created from the financial data
+    '''
     combined_csv_path = './combined.csv'
     bnk_data = load_csv(combined_csv_path)
-    
-    best_params_rf = {'n_estimators': 100, 'min_samples_split': 10, 
-                      'min_samples_leaf': 1, 'max_features': None, 
-                      'max_depth': 15, 'criterion': 'entropy', 
+    '''
+
+    best_params_rf = {'n_estimators': 100, 'min_samples_split': 10,
+                      'min_samples_leaf': 1, 'max_features': None,
+                      'max_depth': 15, 'criterion': 'entropy',
                       'class_weight': None}
-    
+
     threshold_avg_rf = 0.298
-    
-    best_params_xgb = {'subsample': 0.8, 'scale_pos_weight': 10, 
-                       'reg_lambda': 1.0, 'reg_alpha': 1.0, 
-                       'objective': 'binary:logistic', 'n_estimators': 500, 
-                       'max_depth': 7, 'learning_rate': 0.05, 'gamma': 1, 
-                       'eval_metric': 'error', 'eta': 0.5, 
+
+    best_params_xgb = {'subsample': 0.8, 'scale_pos_weight': 10,
+                       'reg_lambda': 1.0, 'reg_alpha': 1.0,
+                       'objective': 'binary:logistic', 'n_estimators': 500,
+                       'max_depth': 7, 'learning_rate': 0.05, 'gamma': 1,
+                       'eval_metric': 'error', 'eta': 0.5,
                        'colsample_bytree': 0.5}
-    
+
     threshold_avg_xgb = 0.564
-    
-    #RF model using traditional predict() instead of predict_proba()
-    model_metrics_rf_trad = get_rf_results_and_plots_trad(
-        bnk_data, best_params_rf, 5
-    )
-    
-    #RF model using predict_proba() instead of predict()
-    model_metrics_rf = get_rf_results_and_plots(
-        bnk_data, best_params_rf, threshold_avg_rf, 5
-    )
-    
-    #XGB model using traditional predict() instead of predict_proba()
-    model_metrics_xgb_trad = get_xgb_results_and_plots_trad(
-        bnk_data, best_params_xgb, 5
-    )
-    
-    #XGB model using predict_proba() instead of predict()
-    model_metrics_xgb = get_xgb_results_and_plots(
-        bnk_data, best_params_xgb, threshold_avg_xgb, 5
+
+    # RF model using traditional predict() instead of predict_proba()
+    print("Creating RandomForest...")
+    model_metrics_rf_trad = get_model_results_and_plots(
+        bnk_data, RandomForestClassifier, best_params_rf, None, 1
     )
 
+    # RF model using predict_proba() instead of predict()
+    print("Creating RandomForest with Threshold...")
+    model_metrics_rf = get_model_results_and_plots(
+        bnk_data, RandomForestClassifier, best_params_rf, threshold_avg_rf, 1
+    )
+
+    # XGB model using traditional predict() instead of predict_proba()
+    print("Creating XGBoost...")
+    model_metrics_xgb_trad = get_model_results_and_plots(
+        bnk_data, xgb.XGBClassifier, best_params_xgb, None, 1
+    )
+
+    # XGB model using predict_proba() instead of predict()
+    print("Creating XGBoost using Threshold...")
+    model_metrics_xgb = get_model_results_and_plots(
+        bnk_data, xgb.XGBClassifier, best_params_xgb, threshold_avg_xgb, 1
+    )
+
+    # Display the results on Console
+    print("Random Forest - No Threshold")
     display_model_metrics(model_metrics_rf_trad)
-    
+
+    print("Random Forest - With Threshold")
     display_model_metrics(model_metrics_rf)
-    
+
+    print("XGBoost - No Threshold")
     display_model_metrics(model_metrics_xgb_trad)
-    
+
+    print("XGBoost - With Threshold")
     display_model_metrics(model_metrics_xgb)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+    print("Script Complete...")
