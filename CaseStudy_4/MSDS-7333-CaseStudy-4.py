@@ -16,13 +16,10 @@ import numpy as np
 import pandas as pd
 from sklearn.impute import KNNImputer
 import xgboost as xgb
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
-# from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import train_test_split
-# from sklearn.model_selection import cross_val_score, cross_val_predict, KFold
 from sklearn.metrics import accuracy_score, precision_score, recall_score
-# from sklearn.metrics import f1_score
-# from matplotlib.ticker import FuncFormatter
 from matplotlib import pyplot as plt
 from sklearn import metrics as mt
 
@@ -150,7 +147,6 @@ def display_model_metrics(metrics):
     rec_var = round(np.var(metrics[2]), 6)
     f1_var = round(np.var(metrics[3]), 6)
 
-    print()
     print('Accuracy:  Mean = {} | Variance = {}'.format(acc_mean, acc_var))
     print('Precision: Mean = {} | Variance = {}'.format(prec_mean, prec_var))
     print('Recall:    Mean = {} | Variance = {}'.format(rec_mean, rec_var))
@@ -159,7 +155,7 @@ def display_model_metrics(metrics):
 
 
 def get_model_results_and_plots(
-        dataframe, model, best_params, thresh, num_tests):
+        dataframe, model, best_params, thresh, num_tests, model_name):
     '''Common function to get results from a passed model'''
     # Split the DataFrame into training and testing sets
 
@@ -227,13 +223,15 @@ def get_model_results_and_plots(
     # Seperate titles if using threshold or not
     if thresh is not None:
         plt.title(
-            'Average Mean Scores |'
+            '{} |'
+            ' Average Mean Scores |'
             ' ProbThreshold = {} |'
-            ' Num_Runs={}'.format(threshold, num_tests))
+            ' Num_Runs={}'.format(model_name, threshold, num_tests))
     else:
         plt.title(
-            'Average Mean Scores |'
-            ' Num_Runs={}'.format(num_tests))
+            '{} |'
+            ' Average Mean Scores |'
+            ' Num_Runs={}'.format(model_name, num_tests))
 
     plt.xlabel('Percentage', fontsize=11, color='blue')
     plt.ylabel('Metrics', fontsize=11, color='blue')
@@ -244,7 +242,9 @@ def get_model_results_and_plots(
 
     # Create Boxplot of model metric variances
     bx_plt = plt.figure()
-    bx_plt.suptitle('Model Metric Variances over {} runs'.format(num_tests))
+    bx_plt.suptitle('{} | Model Metric Variances over {} runs'.format(
+        model_name, num_tests
+    ))
     ax = bx_plt.add_subplot(111)
     plt.boxplot(values)
     plt.grid()
@@ -286,6 +286,23 @@ if __name__ == "__main__":
     combined_csv_path = './combined.csv'
     bnk_data = load_csv(combined_csv_path)
     '''
+    # Scale the data with standard scalling
+    y_tmp = bnk_data['target']
+    bnk_data_tmp = bnk_data.drop(columns=['target'])
+    scaler = StandardScaler()
+    bnk_data = scaler.fit_transform(bnk_data_tmp)
+
+    # Add the columns back
+    # Create columns names. There are 64 attributes and 1 target column
+    headers = []
+    for col_name in range(64):
+        headers.append('X' + str(col_name + 1))
+
+    # Recreate the df with new scaled data
+    bnk_data = pd.DataFrame(bnk_data, columns=headers)
+
+    # add the target column back
+    bnk_data['target'] = y_tmp
 
     best_params_rf = {'n_estimators': 100, 'min_samples_split': 10,
                       'min_samples_leaf': 1, 'max_features': None,
@@ -306,38 +323,48 @@ if __name__ == "__main__":
     # RF model using traditional predict() instead of predict_proba()
     print("Creating RandomForest...")
     model_metrics_rf_trad = get_model_results_and_plots(
-        bnk_data, RandomForestClassifier, best_params_rf, None, 1
+        bnk_data, RandomForestClassifier, best_params_rf, None, 5,
+        'RandomForest'
     )
 
     # RF model using predict_proba() instead of predict()
     print("Creating RandomForest with Threshold...")
     model_metrics_rf = get_model_results_and_plots(
-        bnk_data, RandomForestClassifier, best_params_rf, threshold_avg_rf, 1
+        bnk_data, RandomForestClassifier, best_params_rf, threshold_avg_rf, 5,
+        'RandomForest - w/ Threshold'
     )
 
     # XGB model using traditional predict() instead of predict_proba()
     print("Creating XGBoost...")
     model_metrics_xgb_trad = get_model_results_and_plots(
-        bnk_data, xgb.XGBClassifier, best_params_xgb, None, 1
+        bnk_data, xgb.XGBClassifier, best_params_xgb, None, 5,
+        'XGBoost'
     )
 
     # XGB model using predict_proba() instead of predict()
     print("Creating XGBoost using Threshold...")
     model_metrics_xgb = get_model_results_and_plots(
-        bnk_data, xgb.XGBClassifier, best_params_xgb, threshold_avg_xgb, 1
+        bnk_data, xgb.XGBClassifier, best_params_xgb, threshold_avg_xgb, 5,
+        'XGBoost - w/ Threshold'
     )
+
+    print('\n')  # Seperate log from results
 
     # Display the results on Console
     print("Random Forest - No Threshold")
+    print("-----------------------------")
     display_model_metrics(model_metrics_rf_trad)
 
     print("Random Forest - With Threshold")
+    print("------------------------------")
     display_model_metrics(model_metrics_rf)
 
     print("XGBoost - No Threshold")
+    print("----------------------")
     display_model_metrics(model_metrics_xgb_trad)
 
     print("XGBoost - With Threshold")
+    print("------------------------")
     display_model_metrics(model_metrics_xgb)
 
     print("Script Complete...")
