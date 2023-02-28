@@ -172,7 +172,6 @@ def get_model_results_and_plots(
     precision_means = []
     recall_means = []
     f1_means = []
-    # mnb_auc_means = []
 
     # Container used to feed into charts
     mean_values = []
@@ -323,28 +322,28 @@ if __name__ == "__main__":
     # RF model using traditional predict() instead of predict_proba()
     print("Creating RandomForest...")
     model_metrics_rf_trad = get_model_results_and_plots(
-        bnk_data, RandomForestClassifier, best_params_rf, None, 5,
+        bnk_data, RandomForestClassifier, best_params_rf, None, 1,
         'RandomForest'
     )
 
     # RF model using predict_proba() instead of predict()
     print("Creating RandomForest with Threshold...")
     model_metrics_rf = get_model_results_and_plots(
-        bnk_data, RandomForestClassifier, best_params_rf, threshold_avg_rf, 5,
+        bnk_data, RandomForestClassifier, best_params_rf, threshold_avg_rf, 1,
         'RandomForest - w/ Threshold'
     )
 
     # XGB model using traditional predict() instead of predict_proba()
     print("Creating XGBoost...")
     model_metrics_xgb_trad = get_model_results_and_plots(
-        bnk_data, xgb.XGBClassifier, best_params_xgb, None, 5,
+        bnk_data, xgb.XGBClassifier, best_params_xgb, None, 1,
         'XGBoost'
     )
 
     # XGB model using predict_proba() instead of predict()
     print("Creating XGBoost using Threshold...")
     model_metrics_xgb = get_model_results_and_plots(
-        bnk_data, xgb.XGBClassifier, best_params_xgb, threshold_avg_xgb, 5,
+        bnk_data, xgb.XGBClassifier, best_params_xgb, threshold_avg_xgb, 1,
         'XGBoost - w/ Threshold'
     )
 
