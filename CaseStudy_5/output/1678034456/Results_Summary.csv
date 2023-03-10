@@ -1,0 +1,7 @@
+Run,Classifier,Parameters,is_fit,Acc,Precision,Recall,F1
+1,SVC,"{'C': 1, 'degree': 1, 'coef0': 0.5, 'gamma': 'scale', 'kernel': 'poly', 'decision_function_shape': 'ovr'}",True,0.9832447556775733,0.7304358010228945,0.7366519920913813,0.7331952182374812
+2,SVC,"{'C': 1, 'degree': 1, 'coef0': 1, 'gamma': 'scale', 'kernel': 'poly', 'decision_function_shape': 'ovr'}",True,0.9832447556775733,0.7304358010228945,0.7366519920913813,0.7331952182374812
+3,SVC,"{'C': 3, 'degree': 1, 'coef0': 0.5, 'gamma': 'scale', 'kernel': 'poly', 'decision_function_shape': 'ovr'}",True,0.9885551712314091,0.7364318702472354,0.7395407522627899,0.7378115944063095
+4,SVC,"{'C': 3, 'degree': 1, 'coef0': 1, 'gamma': 'scale', 'kernel': 'poly', 'decision_function_shape': 'ovr'}",True,0.9885551712314091,0.7364318702472354,0.7395407522627899,0.7378115944063095
+5,SVC,"{'C': 5, 'degree': 1, 'coef0': 0.5, 'gamma': 'scale', 'kernel': 'poly', 'decision_function_shape': 'ovr'}",True,0.9893334244264107,0.7373351567432068,0.7401409761508247,0.7385900377310369
+6,SVC,"{'C': 5, 'degree': 1, 'coef0': 1, 'gamma': 'scale', 'kernel': 'poly', 'decision_function_shape': 'ovr'}",True,0.9893334244264107,0.7373351567432068,0.7401409761508247,0.7385900377310369

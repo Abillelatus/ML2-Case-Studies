@@ -1,0 +1,2 @@
+Run,Classifier,Parameters,is_fit,Acc,Precision,Recall,F1
+1,SVC,"{'C': 20, 'degree': 3, 'gamma': 'scale', 'kernel': 'poly', 'decision_function_shape': 'ovr'}",True,0.9931331059988227,0.9931272433586695,0.9931331059988227,0.9928873224143645

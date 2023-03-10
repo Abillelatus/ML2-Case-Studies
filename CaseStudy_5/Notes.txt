@@ -1,0 +1,24 @@
+SGD
+
+penalty: Don't use None
+fit_intercept: Keep True
+early_stopping: Use this 
+Max_Iter: "Epocs" Do not include this on param searching
+warm_start: only use if starting from a previous model or partial fit 
+
+"Ports will be headaches" 
+confusion matrices
+
+
+Find feature importance for both models 
+
+
+
+
+
+
+
+
+
+
+
