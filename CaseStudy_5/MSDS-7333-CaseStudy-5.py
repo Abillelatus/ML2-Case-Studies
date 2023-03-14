@@ -543,14 +543,18 @@ if __name__ == "__main__":
         # Validate paths
         if os.path.exists(args.file):
             # validate blank argument that might default to the home dir
-            if len(args.file) > 1:
+            if len(args.file) > 2:
                 data_path = args.file
             else:
                 raise Exception("-f argument cannot be blank...")
         else:
             raise Exception("Path Provided does not exists or is invalid...")
 
-    data_path = "../Datasets/log2.csv"  # For Spyder Debugging
+    # data_path = "../Datasets/log2.csv"  # For Spyder Debugging
+
+    if data_path == '':
+        raise Exception('[Error] log2.csv path must be'
+                        ' specified with -f or --file')
 
     print("Loading Data...")
     log2_data = load_log2_data(data_path)
