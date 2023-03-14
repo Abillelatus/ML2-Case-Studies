@@ -13,16 +13,19 @@ import numpy as np
 from sklearn.svm import SVC
 from sklearn.linear_model import SGDClassifier
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.model_selection import cross_validate, KFold
+# from sklearn.model_selection import cross_validate, KFold
 from sklearn.compose import ColumnTransformer
-from sklearn.metrics import accuracy_score, precision_score, recall_score
-from sklearn.metrics import confusion_matrix
-import matplotlib.pyplot as plt
-from sklearn import metrics as mt
-from sklearn.model_selection import train_test_split
-import seaborn as sns
+# from sklearn.metrics import accuracy_score, precision_score, recall_score
+# from sklearn.metrics import confusion_matrix
+# import matplotlib.pyplot as plt
+# from sklearn import metrics as mt
+# from sklearn.model_selection import train_test_split
+# import seaborn as sns
 import pandas as pd
 from IPython import get_ipython
+
+# For Gridsearch Testing
+from BFM_Search import BFMSearch
 
 # Needed for showing plots inline when using the spyder IDE
 try:
@@ -314,221 +317,6 @@ def transform_and_scale(encoded_dict):
     return ret_dict
 
 
-def run_svm_cv(data, target, params):
-    """Run cross validation on the SVM model and generate the results"""
-    kf = KFold(n_splits=5)
-    scoring = ['accuracy', 'precision_macro', 'recall_macro',
-               'f1_macro']
-    clf = SVC(**params)
-    scores = cross_validate(
-        clf,
-        data,
-        target,
-        cv=kf,
-        scoring=scoring,
-        n_jobs=-1
-    )
-
-    print(
-        "\n"
-        "SVM Results:\n"
-        "------------\n"
-        "Accuracy: {}\n"
-        "Precision: {}\n"
-        "Recall: {}\n"
-        "F1: {}\n".format(
-            round(sum(scores["test_accuracy"]) / 5, 4),
-            round(sum(scores["test_precision_macro"]) / 5, 4),
-            round(sum(scores["test_recall_macro"]) / 5, 4),
-            round(sum(scores["test_f1_macro"]) / 5, 4)
-        ))
-
-    return scores
-
-
-def get_model_results_and_plots(
-        dataframe, model, best_params, thresh, num_tests, model_name, e_data):
-    '''Common function to get results from a passed model'''
-
-    # Remove the 'target' column from the DataFrame and assign the result to X
-    X = dataframe.drop('Action', axis=1).astype('float32')
-    # Assign the 'target' column to y
-    y = dataframe['Action']
-
-    # Names for the charts
-    names = ['Accuracy', 'Precision', 'Recall', 'F1']
-
-    # Container to hold the means
-    accuracy_means = []
-    precision_means = []
-    recall_means = []
-    f1_means = []
-
-    # Container used to feed into charts
-    mean_values = []
-
-    # Run the model with final stats multiple times to get a mean of all
-    for run in range(num_tests):
-        # Create test train split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, shuffle=True
-        )
-
-        # Instantiate a model from the params
-        test_model = model(**best_params)
-
-        # Fit the Model to the data
-        test_model.fit(X_train, y_train)
-
-        # If a threshold was provided then use it
-        if thresh is not None:
-            # find the best threshold
-            threshold = thresh
-            # calculate class labels using probabilities
-            y_hat = test_model.predict_proba(X_test)[:, 1] >= threshold
-            y_hat = np.where(y_hat, 1, 0)
-
-        else:
-            y_hat = test_model.predict(X_test)
-
-        # Compute the metrics of the model
-        # fpr, tpr, thresholds = mt.roc_curve(y_test, y_hat_proba, pos_label=1)
-        accuracy_means.append(
-            round(accuracy_score(y_test, y_hat), 3))
-        precision_means.append(
-            round(precision_score(y_test, y_hat, average='weighted',
-                                  zero_division=0), 3))
-        recall_means.append(
-            round(recall_score(y_test, y_hat, average='weighted'), 3))
-        f1_means.append(
-            round(mt.f1_score(y_test, y_hat, average='weighted'), 3))
-
-    # --Feature importances begin -- #
-    if hasattr(test_model, 'coef_'):
-        # Get feature importances
-        importances = test_model.coef_[0]
-        # Get column names
-        feature_names = X.columns
-        # Create dictionary of feature names and importances
-        feature_dict = dict(zip(feature_names, importances))
-        # Sort features by importance in descending order
-        sorted_features = sorted(
-            feature_dict.items(), key=lambda x: x[1], reverse=True
-        )
-        # Print sorted feature importances
-        print("Feature Importances:")
-        for feature, importance in sorted_features[:10]:
-            ft = feature
-            # Map back the actual port number for NAT Destination
-            if "NAT" in ft:
-                ft = ft.split('_')
-                ft[-1] = e_data["Encoded_Col_Mapping"][3][int(ft[-1])]
-                feature = ft[0] + "_" + str(ft[-1])
-            # Map back the actual port num for Destination port
-            elif "Destination" in ft:
-                ft = ft.split('_')
-                ft[-1] = e_data["Encoded_Col_Mapping"][1][int(ft[-1])]
-                feature = ft[0] + "_" + str(ft[-1])
-            print(feature, ": ", importance)
-    else:
-        print("Feature importances are not available for this model.")
-    # -- Feature importances end -- #
-
-    mean_values.append(np.mean(accuracy_means))
-    mean_values.append(np.mean(precision_means))
-    mean_values.append(np.mean(recall_means))
-    mean_values.append(np.mean(f1_means))
-
-    # -- Confusion matrix heatmap begin -- #
-    # Define dictionary to map integer labels to string labels
-    label_map = {0: 'allow', 1: 'deny', 2: 'drop', 3: 'reset-both'}
-    # Convert integer labels to string labels for y_test
-    y_test_labels = [label_map[label] for label in y_test]
-    # Convert integer labels to string labels for y_hat
-    y_hat_labels = [label_map[label] for label in y_hat]
-    # Update classes to contain string labels
-    classes = ['allow', 'deny', 'drop', 'reset-both']
-    # Create confusion matrix
-    confusion_mat = confusion_matrix(
-        y_test_labels, y_hat_labels, labels=classes
-    )
-    # Convert to pandas DataFrame
-    confusion_df = pd.DataFrame(confusion_mat, index=classes, columns=classes)
-    # Create heatmap
-    sns.heatmap(confusion_df, annot=True, cmap="Blues", fmt="g")
-
-    # Add labels and title
-    plt.xlabel("Predicted Labels")
-    plt.ylabel("True Labels")
-    plt.title("{} | Confusion Matrix".format(model_name))
-    # Display plot
-    plt.show()
-    # -- Confusion matrix heatmap end -- #
-
-    # Create the barplot figure
-    fig, ax = plt.subplots()
-    bars = ax.barh(names, mean_values)
-    ax.bar_label(bars)
-    plt.yticks(names)
-
-    # Seperate titles if using threshold or not
-    if thresh is not None:
-        plt.title(
-            '{} |'
-            ' Average Mean Scores |'
-            ' ProbThreshold = {} |'
-            ' Num_Runs={}'.format(model_name, threshold, num_tests))
-    else:
-        plt.title(
-            '{} |'
-            ' Average Mean Scores |'
-            ' Num_Runs={}'.format(model_name, num_tests))
-
-    plt.xlabel('Percentage', fontsize=11, color='blue')
-    plt.ylabel('Metrics', fontsize=11, color='blue')
-    plt.show()
-
-    # Create list of lists for the boxplot
-    values = [accuracy_means, precision_means, recall_means, f1_means]
-
-    # Create Boxplot of model metric variances
-    bx_plt = plt.figure()
-    bx_plt.suptitle('{} | Model Metric Variances over {} runs'.format(
-        model_name, num_tests
-    ))
-    ax = bx_plt.add_subplot(111)
-    plt.boxplot(values)
-    plt.grid()
-    plt.tight_layout(pad=1.5)
-    ax.set_xticklabels(names)
-    plt.xlabel('Model Metric',
-               fontsize=11, color='blue')
-    plt.ylabel('Score (as a percentage)', fontsize=11, color='blue')
-    plt.show()
-
-    return values
-
-
-def display_model_metrics(metrics):
-    '''Print out formatted metrics for the model'''
-    # Get the means
-    acc_mean = round(np.mean(metrics[0]), 3)
-    prec_mean = round(np.mean(metrics[1]), 3)
-    rec_mean = round(np.mean(metrics[2]), 3)
-    f1_mean = round(np.mean(metrics[3]), 3)
-    # Get the variance
-    acc_var = round(np.var(metrics[0]), 6)
-    prec_var = round(np.var(metrics[1]), 6)
-    rec_var = round(np.var(metrics[2]), 6)
-    f1_var = round(np.var(metrics[3]), 6)
-
-    print('Accuracy:  Mean = {} | Variance = {}'.format(acc_mean, acc_var))
-    print('Precision: Mean = {} | Variance = {}'.format(prec_mean, prec_var))
-    print('Recall:    Mean = {} | Variance = {}'.format(rec_mean, rec_var))
-    print('F1_Score:  Mean = {} | Variance = {}'.format(f1_mean, f1_var))
-    print()
-
-
 if __name__ == "__main__":
     # Grab arguments
     parser = argparse.ArgumentParser(description=program_desc)
@@ -580,42 +368,35 @@ if __name__ == "__main__":
     # Drop Source Ports
     df = df.drop(["Source Port", "NAT Source Port"], axis=1)
 
-    # Get the best params for SVM
-    best_params_SVM = {
-        'C': 1, 'kernel': 'rbf',
-        'class_weight': None, 'decision_function_shape': 'ovr'
+    # -- Start grid search testing
+    # Get the target
+    df_target = df["Action"]
+    # Create df without the target column
+    df_data = df.drop(["Action"], axis=1)
+
+    # Create params for svm
+    svm_params = {
+        SVC: {
+            'C': [.000001, .00001, .0001, .001, .01, .1, 1.0, 5, 10, 20]
+        }
     }
 
-    # Get the best params for SGD
-    best_params_sgd = {
-        'loss': 'modified_huber', 'penalty': 'l2', 'alpha': 1e-6,
-        'max_iter': 1000, "learning_rate": 'optimal',
-        'early_stopping': True, 'n_iter_no_change': 5,
-        'class_weight': None
+    # Create params for sgd
+    sgd_params = {
+        SGDClassifier: {
+            'alpha': [1e-10, 1e-9, 1e-8, 1e-7, 1e-6,
+                      1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]
+        }
     }
 
-    # SVM model using predict()
-    print("Creating SVM...")
-    model_metrics_svm_trad = get_model_results_and_plots(
-        df, SVC, best_params_SVM,
-        None, 1, 'SVC', encoded_info
+    # Run Test for SVM
+    svm_search = BFMSearch()
+    svm_search.run(
+        svm_params, df_data, df_target, metric="weighted", create_csv=True
     )
 
-    # SGD model using predict()
-    print("Creating SGD model...")
-    model_metrics_sgd_trad = get_model_results_and_plots(
-        df, SGDClassifier, best_params_sgd, None, 1,
-        'SGD', encoded_info
+    # Run Test for SGD
+    sgd_search = BFMSearch()
+    sgd_search.run(
+        sgd_params, df_data, df_target, metric="weighted", create_csv=True
     )
-
-    print('\n')  # Seperate log from results
-
-    # Display the results on Console
-    print("SVM")
-    print("-----------------------------")
-    display_model_metrics(model_metrics_svm_trad)
-    print("SGD")
-    print("------------------------------")
-    display_model_metrics(model_metrics_sgd_trad)
-
-    print("Script Complete...")

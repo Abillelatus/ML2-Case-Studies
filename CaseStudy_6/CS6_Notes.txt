@@ -1,0 +1,46 @@
+Case Study 6 notes:
+
+Types of nueral networks 
+	- Dense = General 
+	- cnn = images 
+	- rnn = language
+
+- Will be using the Dense NN 
+- Do not use a cnn or rnn for the case studies 
+- Tensorflow or we can use PyTorch (PyTorch Lighting as well)
+- Stop around 5-6 layers (see vanishing gradient)
+- Building the architecture is the hyperparameter (neurons, activation functions, learning rate, ect)
+- Find good inputs to reduce space 
+- The best way to pick weights is to leave it at default
+	- it happens in the dense layer 
+	- wx * b ((weights activation) * bias)
+- DO NOT USE SGD on the case study 
+	- use "adam", "RMSprop"
+	- pick one, get familiar, and stick with it. 
+	- NOT a hyperparameter
+- DO NOT use mean squared error on classifier
+	- Case study is binary 
+	- Find best loss function for classifier
+- Set EPOCHS high > 1,000
+- Set EARLY STOPPING TO TRUE for the NN case studies 
+	- EarlyStopping(patience=5)
+	- the function to pass for early stopping
+- aprox accuracy expect ~80%
+- NN are sensitive to scaling. Scale data first
+- Do not include datafile in HW submission
+- Train test split. Do not need to crossvalidate 
+- Freedom to pick the number of nuerons on the dense layer (He used 100)
+- Batch size is fairly small (100 - 10,000 for case study)
+	- To small means noisy updates 
+- Train test line graph of the loss 
+	- Test is okay to be jagged
+- install graphviz to display connections (not required for case study) 
+	- tf.keras.utils.plot_model() 
+- tf.keras.losses. "Find the right one for binary"
+- NN give you the probabilities as an array and you need to use numpy.argmax() to get the classifications
+
+params to tune:
+- # layers, # nuerons, Learning rates, regularization (L2, dropoutLayer)
+	- dropout: model.add(layers.Dropout(0.3)) | try 10% - 50%
+- Random Search instead of Grid. 
+- Bonus point (possibly) for creating a data loader. No idea what that is. 
